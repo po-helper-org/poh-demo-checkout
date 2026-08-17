@@ -1,0 +1,145 @@
+# Ревью PR (PR-Agent на GLM) + доклад в цикл Issue.
+#
+# Два входа, один код ревью:
+#
+#   workflow_call   — вызов из прогона разработки сразу после открытия PR.
+#                     Именно вызов, а не отдельный триггер: PR, созданный
+#                     GITHUB_TOKEN, НЕ порождает событий workflow (правило
+#                     GitHub против рекурсии), и ревью по событию `pull_request`
+#                     на таком PR не запустилось бы никогда. Вызванный workflow
+#                     идёт частью того же прогона и этого ограничения не знает.
+#
+#   issue_comment   — повторная проверка после правок: человек (или Claude Code)
+#                     пишет `/review` в PR. Комментарий от живого пользователя
+#                     события порождает, здесь ограничения нет.
+#
+# Ревью гоняется CLI-образом pr-agent, а не GitHub Action'ом: action читает
+# событие прогона и на `workflow_call` не нашёл бы PR, о котором речь. CLI
+# принимает адрес PR явным аргументом и одинаково работает с обоих входов.
+name: PR Review
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        required: true
+        type: string
+      root_issue:
+        required: false
+        type: string
+        default: ''
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+    name: ревью PR
+    runs-on: ubuntu-latest
+    # Для комментария: только в PR, только команда `/review`, только от человека.
+    # Без последнего условия собственный ответ бота снова запускал бы ревью.
+    if: >-
+      github.event_name == 'workflow_call' ||
+      (github.event.issue.pull_request != null &&
+       startsWith(github.event.comment.body, '/review') &&
+       github.event.comment.user.type != 'Bot')
+    timeout-minutes: 20
+
+    env:
+      PR_NUMBER: ${{ inputs.pr_number || github.event.issue.number }}
+      GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
+
+    steps:
+      - name: Рубильник человека
+        # Правило R4: проверка раньше первого обращения к LLM. `agents:off` на
+        # PR либо на связанном Issue останавливает ревью до траты бюджета.
+        id: gate
+        run: |
+          set -euo pipefail
+          labels=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+                     --json labels --jq '.labels[].name')
+          if grep -qix 'agents:off' <<<"$labels"; then
+            echo "::notice::agents:off на PR #$PR_NUMBER — ревью не запускается"
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Ревью
+        id: review
+        if: steps.gate.outputs.go == 'true'
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_MODEL: ${{ vars.PR_AGENT_MODEL || 'openai/glm-4.6' }}
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL || 'https://api.z.ai/api/coding/paas/v4' }}
+        run: |
+          set -euo pipefail
+          url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/pull/${PR_NUMBER}"
+          # persistent_comment (дефолт) переписывает ОДИН верхний комментарий
+          # «PR Reviewer Guide» вместо того, чтобы плодить новый на каждый круг.
+          # Именно поэтому «замечаний нет» видно как исчезнувший пункт, а не как
+          # отдельное сообщение.
+          docker run --rm \
+            -e "OPENAI.KEY=${LLM_API_KEY}" \
+            -e "OPENAI.API_BASE=${LLM_BASE_URL}" \
+            -e "CONFIG.MODEL=${LLM_MODEL}" \
+            -e "CONFIG.FALLBACK_MODELS=[]" \
+            -e "CONFIG.CUSTOM_MODEL_MAX_TOKENS=128000" \
+            -e "CONFIG.GIT_PROVIDER=github" \
+            -e "CONFIG.PUBLISH_OUTPUT=true" \
+            -e "GITHUB.USER_TOKEN=${GH_TOKEN}" \
+            -e "GITHUB.DEPLOYMENT_TYPE=user" \
+            codiumai/pr-agent:latest --pr_url "$url" review
+
+      - name: Доложить в цикл Issue
+        # Уходит всегда: цикл ждёт в фазе `pr-open`, и молчание провалившегося
+        # ревью оставило бы задачу там навсегда. Нечем доложить — тоже факт.
+        if: always() && steps.gate.outputs.go == 'true'
+        env:
+          ISSUE_AGENT_URL: ${{ secrets.ISSUE_AGENT_URL }}
+          AGENT_EVENT_SECRET: ${{ secrets.AGENT_EVENT_SECRET }}
+          ROOT_ISSUE: ${{ inputs.root_issue }}
+          REVIEW_OUTCOME: ${{ steps.review.outcome }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ISSUE_AGENT_URL:-}" ] || [ -z "${AGENT_EVENT_SECRET:-}" ]; then
+            echo "::warning::ISSUE_AGENT_URL/AGENT_EVENT_SECRET не заданы — событие не отправлено"
+            exit 0
+          fi
+
+          # Ключ задачи: из входа вызова, иначе из тела PR. Несколько `Closes #N`
+          # оставляют ключ пустым намеренно — выбрать первый попавшийся значит
+          # привязать работу не к той задаче.
+          root="$ROOT_ISSUE"
+          if [ -z "$root" ]; then
+            body=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+            mapfile -t found < <(grep -oiE '\b(close[sd]?|fix(e[sd])?|resolve[sd]?)[: ]+#[0-9]+' <<<"$body" \
+                                 | grep -oE '[0-9]+' | sort -u)
+            [ "${#found[@]}" -eq 1 ] && root="${found[0]}"
+          fi
+
+          if [ "$REVIEW_OUTCOME" = "success" ]; then
+            status=started
+            detail="PR-Agent опубликовал ревью на PR #${PR_NUMBER}"
+          else
+            status=failed
+            detail="Ревью не выполнено: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          fi
+
+          payload=$(jq -nc --arg repo "$GITHUB_REPOSITORY" --arg status "$status" \
+            --arg ref "$PR_NUMBER" --arg detail "$detail" --arg root "$root" \
+            '{repo:$repo, agent:"pr-agent", phase:"pr-review", status:$status,
+              ref:$ref, detail:$detail}
+             + (if $root == "" then {} else {root_issue: ($root|tonumber)} end)')
+
+          sig="sha256=$(printf '%s' "$payload" \
+            | openssl dgst -sha256 -hmac "$AGENT_EVENT_SECRET" -r | cut -d' ' -f1)"
+
+          curl -sS --fail-with-body -X POST "${ISSUE_AGENT_URL%/}/agent-event" \
+            -H 'Content-Type: application/json' \
+            -H "X-Agent-Signature-256: $sig" \
+            -d "$payload"
