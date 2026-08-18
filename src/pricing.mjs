@@ -50,3 +50,6 @@ export function quote(items) {
   const delivery = deliveryFee(goods);
   return { goods, delivery, total: goods + delivery };
 }
+
+// smoke: проверка ревью
+export const SMOKE = true;
