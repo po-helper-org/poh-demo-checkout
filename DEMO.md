@@ -9,6 +9,21 @@
 
 ---
 
+## Прогон, на котором это проверено
+
+Не сценарий, а факт: задача [#1](https://github.com/po-helper-org/poh-demo-checkout/issues/1)
+прошла путь целиком 2026-08-18, без ручного вмешательства между шагами.
+
+| Что смотреть | Где |
+|---|---|
+| Триаж и фазы | метки на [#1](https://github.com/po-helper-org/poh-demo-checkout/issues/1): `advisor:feature-request` → `priority:P3` → `phase:pr-review` |
+| Аналитика | ветка `research/issue-1`, каталог `sa_documentation/FNR/FNR_1/` |
+| Разработка | [PR #6](https://github.com/po-helper-org/poh-demo-checkout/pull/6): три файла, тестов стало 15 вместо 8 |
+| Декомпозиция | [SubIssue #4](https://github.com/po-helper-org/poh-demo-checkout/issues/4) — агент нашёл edge-кейс, завёл отдельно и не стал чинить в той же ветке |
+| Ревью | комментарий `PR Reviewer Guide 🔍` на PR #6 |
+
+---
+
 ## Две активности контура
 
 | | Research | Develop |
