@@ -115,7 +115,9 @@ jobs:
         with:
           node-version: '22'
 
-      - uses: astral-sh/setup-uv@v10
+      # Версия точная, не плавающая: у setup-uv нет тегов-мажоров выше v8 —
+      # `@v10` не резолвится вовсе, и прогон падает на подготовке job'а.
+      - uses: astral-sh/setup-uv@v10.0.1
 
       - name: Установить OpenHands
         run: uv tool install openhands --python 3.12
