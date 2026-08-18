@@ -40,10 +40,15 @@ jobs:
   review:
     name: ревью PR
     runs-on: ubuntu-latest
+    # Вход различается по `inputs`, а НЕ по `github.event_name`: вызванный
+    # workflow наследует контекст вызывающего, и `event_name` там показывает
+    # исходное событие (`workflow_dispatch`), а не `workflow_call`. Условие на
+    # `event_name` молча пропускало ревью после каждой разработки.
+    #
     # Для комментария: только в PR, только команда `/review`, только от человека.
     # Без последнего условия собственный ответ бота снова запускал бы ревью.
     if: >-
-      github.event_name == 'workflow_call' ||
+      inputs.pr_number != '' ||
       (github.event.issue.pull_request != null &&
        startsWith(github.event.comment.body, '/review') &&
        github.event.comment.user.type != 'Bot')
