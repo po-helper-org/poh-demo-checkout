@@ -2,8 +2,26 @@
 // и проверяется без сети, здесь остаётся только разбор запроса и коды ответов.
 
 import { createServer } from 'node:http';
+import { readFileSync, statSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { quote } from './pricing.mjs';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const STATIC_DIR = join(__dirname, '../static');
+
+const MIME_TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+};
 
 const PORT = Number(process.env.PORT || 8080);
 
@@ -14,6 +32,52 @@ function send(res, code, body) {
     'content-length': Buffer.byteLength(payload),
   });
   res.end(payload);
+}
+
+function sendStatic(res, filePath) {
+  try {
+    const ext = filePath.split('.').pop().toLowerCase();
+    const mimeType = MIME_TYPES[`.${ext}`] || 'application/octet-stream';
+    
+    const content = readFileSync(filePath);
+    res.writeHead(200, {
+      'content-type': mimeType,
+      'content-length': Buffer.byteLength(content),
+    });
+    res.end(content);
+  } catch (err) {
+    send(res, 404, { error: 'файл не найден' });
+  }
+}
+
+function serveStatic(url) {
+  // Remove leading slash and decode URI
+  const path = url === '/' ? '/index.html' : url;
+  const decodedPath = decodeURIComponent(path);
+  const filePath = join(STATIC_DIR, decodedPath);
+  
+  try {
+    // Security check: ensure file is within STATIC_DIR
+    const stats = statSync(filePath);
+    const realPath = filePath; // Use the resolved path
+    
+    // Check if the path is within STATIC_DIR by comparing normalized paths
+    const normalizedStatic = STATIC_DIR.replace(/\\/g, '/');
+    const normalizedFile = realPath.replace(/\\/g, '/');
+    
+    if (!normalizedFile.startsWith(normalizedStatic)) {
+      return null;
+    }
+    
+    // Only serve regular files
+    if (!stats.isFile()) {
+      return null;
+    }
+    
+    return filePath;
+  } catch {
+    return null;
+  }
 }
 
 async function readJson(req) {
@@ -39,6 +103,14 @@ export const app = async (req, res) => {
       return send(res, 200, quote(body?.items));
     } catch (err) {
       return send(res, 400, { error: err.message });
+    }
+  }
+
+  // Serve static files for GET requests
+  if (req.method === 'GET') {
+    const staticPath = serveStatic(req.url);
+    if (staticPath) {
+      return sendStatic(res, staticPath);
     }
   }
 
