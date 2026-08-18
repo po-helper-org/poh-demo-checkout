@@ -50,3 +50,27 @@ export function quote(items) {
   const delivery = deliveryFee(goods);
   return { goods, delivery, total: goods + delivery };
 }
+
+/**
+ * Форматирование суммы в рублях.
+ * @param {number} amount - неотрицательная сумма в рублях
+ * @returns {string} отформатированная строка вида "1 500 ₽"
+ */
+export function formatRub(amount) {
+  if (!Number.isFinite(amount)) {
+    throw new Error('некорректная сумма');
+  }
+  if (amount < 0) {
+    throw new Error('отрицательная сумма');
+  }
+  const integerAmount = Math.floor(amount);
+  const formatted = integerAmount.toString();
+  const parts = [];
+  for (let i = formatted.length - 1, count = 0; i >= 0; i--, count++) {
+    if (count > 0 && count % 3 === 0) {
+      parts.push(' ');
+    }
+    parts.push(formatted[i]);
+  }
+  return parts.reverse().join('') + ' ₽';
+}

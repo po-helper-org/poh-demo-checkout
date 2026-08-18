@@ -7,6 +7,7 @@ import {
   deliveryFee,
   quote,
   subtotal,
+  formatRub,
 } from '../src/pricing.mjs';
 
 test('сумма позиций считается по количеству, а не по числу строк', () => {
@@ -49,4 +50,20 @@ test('крупный заказ едет без платы за доставку
     delivery: 0,
     total: 3500,
   });
+});
+
+test('formatRub(1500) === "1 500 ₽"', () => {
+  assert.equal(formatRub(1500), '1 500 ₽');
+});
+
+test('formatRub выбрасывает ошибку для отрицательной суммы', () => {
+  assert.throws(() => formatRub(-1), /отрицательная/);
+});
+
+test('formatRub форматирует ноль', () => {
+  assert.equal(formatRub(0), '0 ₽');
+});
+
+test('formatRub форматирует крупные суммы', () => {
+  assert.equal(formatRub(1000000), '1 000 000 ₽');
 });
