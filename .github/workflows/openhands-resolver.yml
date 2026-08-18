@@ -35,14 +35,6 @@ on:
   issues:
     types: [labeled]
 
-# Один прогон на Issue. Второй диспатч по той же задаче отменяет предыдущий:
-# две ветки от одного Issue дают два PR с одним `Closes #N`, и корреляция
-# события с задачей становится неоднозначной — ровно тот случай, который
-# Issue-Agent отказывается разрешать догадкой.
-concurrency:
-  group: openhands-${{ github.event.inputs.issue_number || github.event.issue.number }}
-  cancel-in-progress: true
-
 # Права выданы job'ам явно и минимально: ветка и коммит (contents), SubIssue по
 # найденным edge-кейсам (issues), сам PR (pull-requests).
 permissions:
@@ -92,6 +84,18 @@ jobs:
     needs: gate
     if: needs.gate.outputs.go == 'true'
     timeout-minutes: 45
+    # Ограничение на УРОВНЕ JOB, а не workflow. На уровне workflow оно убивало
+    # собственный прогон: каждая метка, которую вешает Issue-Agent, порождает
+    # событие `issues.labeled`, такой прогон попадает в ту же группу и, хотя все
+    # его job'ы пропускаются, всё равно вытесняет идущую разработку. Job в группу
+    # не входит, пока не запустился, поэтому пропущенные прогоны безвредны.
+    #
+    # Сама группа нужна: две ветки от одного Issue дают два PR с одним
+    # `Closes #N`, и корреляция события с задачей становится неоднозначной —
+    # ровно тот случай, который Issue-Agent отказывается разрешать догадкой.
+    concurrency:
+      group: openhands-${{ github.event.inputs.issue_number || github.event.issue.number }}
+      cancel-in-progress: true
     outputs:
       pr_number: ${{ steps.pr.outputs.number }}
 
