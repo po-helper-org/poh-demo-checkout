@@ -9,6 +9,14 @@ export const DELIVERY_FEE = 300;
 // бы дороже, чем читается.
 export const FREE_DELIVERY_FROM = 3000;
 
+// Промо-коды для демо-стенда. В боевой системе это должен быть внешний
+// конфиг или сервис — Концепт 2b из system_requirements.md.
+export const PROMO_CODES = {
+  'WELCOME10': { percent: 10, activeUntil: null },
+  'SUMMER20': { percent: 20, activeUntil: '2026-09-01' },
+  'FALL15': { percent: 15, activeUntil: '2026-12-01' },
+};
+
 /**
  * Позиция заказа: цена за штуку в рублях и количество.
  * @typedef {{sku: string, price: number, qty: number}} Item
@@ -42,11 +50,39 @@ export function deliveryFee(amount) {
 }
 
 /**
- * Итог заказа: позиции, доставка, сумма к оплате.
- * @param {Item[]} items
+ * Валидация промо-кода. Возвращает процент скидки или null для невалидного кода.
+ * @param {string} code
+ * @param {Date} now
  */
-export function quote(items) {
+function validatePromoCode(code, now = new Date()) {
+  const config = PROMO_CODES[code];
+  if (!config) return null;
+  if (config.activeUntil && new Date(config.activeUntil) < now) return null;
+  return config.percent;
+}
+
+/**
+ * Расчёт суммы скидки в рублях.
+ * @param {number} goods
+ * @param {string|null} promoCode
+ */
+export function discountAmount(goods, promoCode) {
+  if (!promoCode) return 0;
+  const percent = validatePromoCode(promoCode);
+  if (percent === null) {
+    throw new Error('неизвестный промо-код');
+  }
+  return goods * percent / 100;
+}
+
+/**
+ * Итог заказа: позиции, скидка, доставка, сумма к оплате.
+ * @param {Item[]} items
+ * @param {string|null} promoCode
+ */
+export function quote(items, promoCode = null) {
   const goods = subtotal(items);
-  const delivery = deliveryFee(goods);
-  return { goods, delivery, total: goods + delivery };
+  const discount = discountAmount(goods, promoCode);
+  const delivery = deliveryFee(goods); // Порог считается ДО скидки
+  return { goods, discount, delivery, total: goods - discount + delivery };
 }
