@@ -9,6 +9,10 @@ export const DELIVERY_FEE = 300;
 // бы дороже, чем читается.
 export const FREE_DELIVERY_FROM = 3000;
 
+// Параметры упаковки: 50 ₽ за посылку, до 5 единиц товара в посылке.
+export const PACKAGING_FEE = 50;
+export const PACKAGES_CAPACITY = 5;
+
 /**
  * Позиция заказа: цена за штуку в рублях и количество.
  * @typedef {{sku: string, price: number, qty: number}} Item
@@ -42,11 +46,29 @@ export function deliveryFee(amount) {
 }
 
 /**
- * Итог заказа: позиции, доставка, сумма к оплате.
+ * Количество посылок для набора позиций.
+ * @param {Item[]} items
+ */
+export function countPackages(items) {
+  const units = items.reduce((sum, item) => sum + item.qty, 0);
+  return Math.ceil(units / PACKAGES_CAPACITY);
+}
+
+/**
+ * Стоимость упаковки для числа посылок.
+ * @param {number} packages
+ */
+export function packagingFee(packages) {
+  return packages * PACKAGING_FEE;
+}
+
+/**
+ * Итог заказа: позиции, посылки, доставка, сумма к оплате.
  * @param {Item[]} items
  */
 export function quote(items) {
   const goods = subtotal(items);
-  const delivery = deliveryFee(goods);
-  return { goods, delivery, total: goods + delivery };
+  const packages = countPackages(items);
+  const delivery = deliveryFee(goods) + packagingFee(packages);
+  return { goods, packages, delivery, total: goods + delivery };
 }
