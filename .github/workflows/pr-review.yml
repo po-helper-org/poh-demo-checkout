@@ -169,10 +169,18 @@ jobs:
             detail="Ревью не выполнено: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           fi
 
+          # Ревизия, по которой шло ревью, входит в ключ идемпотентности цикла.
+          # Без неё каждый круг правок докладывал одну и ту же тройку
+          # `(ref, phase, status)`, второй доклад отбрасывался как повторная
+          # доставка — и круг правок физически не мог пройти дважды.
+          revision=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+                       --json headRefOid --jq .headRefOid)
+
           payload=$(jq -nc --arg repo "$GITHUB_REPOSITORY" --arg status "$status" \
             --arg ref "$PR_NUMBER" --arg detail "$detail" --arg root "$root" \
+            --arg revision "$revision" \
             '{repo:$repo, agent:"pr-agent", phase:"pr-review", status:$status,
-              ref:$ref, detail:$detail}
+              ref:$ref, detail:$detail, revision:$revision}
              + (if $root == "" then {} else {root_issue: ($root|tonumber)} end)')
 
           sig="sha256=$(printf '%s' "$payload" \
