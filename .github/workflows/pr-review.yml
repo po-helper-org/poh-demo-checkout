@@ -98,23 +98,41 @@ jobs:
           LLM_MODEL: ${{ vars.PR_AGENT_MODEL || 'openai/glm-4.6' }}
           LLM_BASE_URL: ${{ vars.LLM_BASE_URL || 'https://api.z.ai/api/coding/paas/v4' }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/pull/${PR_NUMBER}"
-          # persistent_comment (дефолт) переписывает ОДИН верхний комментарий
-          # «PR Reviewer Guide» вместо того, чтобы плодить новый на каждый круг.
-          # Именно поэтому «замечаний нет» видно как исчезнувший пункт, а не как
-          # отдельное сообщение.
-          docker run --rm \
-            -e "OPENAI.KEY=${LLM_API_KEY}" \
-            -e "OPENAI.API_BASE=${LLM_BASE_URL}" \
-            -e "CONFIG.MODEL=${LLM_MODEL}" \
-            -e "CONFIG.FALLBACK_MODELS=[]" \
-            -e "CONFIG.CUSTOM_MODEL_MAX_TOKENS=128000" \
-            -e "CONFIG.GIT_PROVIDER=github" \
-            -e "CONFIG.PUBLISH_OUTPUT=true" \
-            -e "GITHUB.USER_TOKEN=${GH_TOKEN}" \
-            -e "GITHUB.DEPLOYMENT_TYPE=user" \
-            codiumai/pr-agent:latest --pr_url "$url" review
+
+          # pr-agent ВЫХОДИТ НУЛЁМ, даже когда ревью не состоялось: на
+          # rate-limit модели он пишет `Failed to review PR` в лог, оставляет в
+          # PR заглушку «Preparing review...» и завершается успешно. Шаг Actions
+          # отчитывался успехом, цикл получал `status=started`, и круг правок
+          # уходил доводить PR по пустому тексту. Поэтому исход определяется по
+          # выводу, а не по коду возврата.
+          review() {
+            # persistent_comment (дефолт) переписывает ОДИН верхний комментарий
+            # «PR Reviewer Guide» вместо того, чтобы плодить новый на каждый круг.
+            # Именно поэтому «замечаний нет» видно как исчезнувший пункт, а не как
+            # отдельное сообщение.
+            docker run --rm \
+              -e "OPENAI.KEY=${LLM_API_KEY}" \
+              -e "OPENAI.API_BASE=${LLM_BASE_URL}" \
+              -e "CONFIG.MODEL=${LLM_MODEL}" \
+              -e "CONFIG.FALLBACK_MODELS=[]" \
+              -e "CONFIG.CUSTOM_MODEL_MAX_TOKENS=128000" \
+              -e "CONFIG.GIT_PROVIDER=github" \
+              -e "CONFIG.PUBLISH_OUTPUT=true" \
+              -e "GITHUB.USER_TOKEN=${GH_TOKEN}" \
+              -e "GITHUB.DEPLOYMENT_TYPE=user" \
+              codiumai/pr-agent:latest --pr_url "$url" review 2>&1 | tee /tmp/review.log
+            ! grep -q "Failed to review PR" /tmp/review.log
+          }
+
+          # Один повтор с паузой: rate-limit — состояние на минуту, а не отказ.
+          # Больше одного не нужно: если ключ выбран надолго, PR подождёт
+          # человека, а не будет жечь минуты раннера.
+          review && exit 0
+          echo "::warning::ревью не удалось с первого раза — повтор через 90 с"
+          sleep 90
+          review
 
       - name: Доложить в цикл Issue
         # Уходит всегда: цикл ждёт в фазе `pr-open`, и молчание провалившегося
