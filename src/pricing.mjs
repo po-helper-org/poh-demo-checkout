@@ -38,6 +38,9 @@ export function subtotal(items) {
  * @param {number} amount
  */
 export function deliveryFee(amount) {
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw new Error('некорректная сумма заказа');
+  }
   return amount >= FREE_DELIVERY_FROM ? 0 : DELIVERY_FEE;
 }
 
