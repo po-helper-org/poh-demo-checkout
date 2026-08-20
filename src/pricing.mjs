@@ -12,6 +12,12 @@ export const FREE_DELIVERY_FROM = 3000;
 // Минимальная сумма заказа для оформления.
 export const MIN_ORDER_AMOUNT = 1000;
 
+// Реестр промокодов. При расширении типов скидок (фиксированная сумма, "2+1")
+// следует вынести логику в отдельный модуль.
+export const PROMO_CODES = {
+  SALE10: { discount: 0.10, description: 'Скидка 10%' }
+};
+
 /**
  * Позиция заказа: цена за штуку в рублях и количество.
  * @typedef {{sku: string, price: number, qty: number}} Item
@@ -45,14 +51,32 @@ export function deliveryFee(amount) {
 }
 
 /**
- * Итог заказа: позиции, доставка, сумма к оплате.
+ * Итог заказа: позиции, доставка, скидка по промокоду, сумма к оплате.
  * @param {Item[]} items
+ * @param {string|null} promoCode — опциональный промокод
  */
-export function quote(items) {
+export function quote(items, promoCode = null) {
   const goods = subtotal(items);
   if (goods < MIN_ORDER_AMOUNT) {
     throw new Error(`минимальная сумма заказа ${MIN_ORDER_AMOUNT}, не хватает ${MIN_ORDER_AMOUNT - goods}`);
   }
   const delivery = deliveryFee(goods);
-  return { goods, delivery, total: goods + delivery };
+
+  let discount = 0;
+  let promoStatus = 'none';
+
+  if (promoCode) {
+    const promo = PROMO_CODES[promoCode];
+    if (promo) {
+      // Скидка только на товары, доставка не скидывается
+      // Округление до 2 знаков после запятой для избежания ошибок плавающей точки
+      discount = Math.round(goods * promo.discount * 100) / 100;
+      promoStatus = 'applied';
+    } else {
+      promoStatus = 'unknown';
+    }
+  }
+
+  // total = товары - скидка + доставка
+  return { goods, delivery, discount, promoStatus, total: goods - discount + delivery };
 }
