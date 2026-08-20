@@ -63,7 +63,8 @@ export function quote(items, promoCode = null) {
     const promo = PROMO_CODES[promoCode];
     if (promo) {
       // Скидка только на товары, доставка не скидывается
-      discount = goods * promo.discount;
+      // Округление до 2 знаков после запятой для избежания ошибок плавающей точки
+      discount = Math.round(goods * promo.discount * 100) / 100;
       promoStatus = 'applied';
     } else {
       promoStatus = 'unknown';
