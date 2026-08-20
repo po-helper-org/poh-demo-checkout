@@ -1,0 +1,1165 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+.github/
+  workflows/
+    ci.yml
+    openhands-resolver.yml
+    pr-review.yml
+.openhands/
+  task-rules.md
+src/
+  pricing.mjs
+  server.mjs
+tests/
+  pricing.test.mjs
+.gitignore
+AGENTS.md
+CLAUDE.md
+DEMO.md
+package.json
+README.md
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path=".github/workflows/ci.yml">
+# Проверка каждого PR и каждого коммита в main.
+#
+# Зависимостей у сервиса нет намеренно — это его свойство, а не упущение, и
+# `npm ci` здесь молча создал бы их появлению повод.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: тесты
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test "tests/*.test.mjs"
+</file>
+
+<file path=".github/workflows/openhands-resolver.yml">
+# Активность Develop контура: подготовленный Issue → ветка → код → PR.
+#
+# Issue-Agent доводит задачу до `ready-for-dev` и системных требований, после чего
+# диспатчит этот workflow (`shared/develop.py` в poh-issue-agents). Код пишет
+# OpenHands в headless-режиме — прямо на раннере, без Docker-песочницы: раннер
+# одноразовый и сам является песочницей, а поднимать внутри него ещё одну значит
+# платить минутами за изоляцию, которая уже есть.
+#
+# Почему `workflow_dispatch`, а не метка-триггер. Метка — состояние, а не событие:
+# повторная постановка уже висящей метки не шлёт ничего, и запуск теряется молча.
+# Второй вход по метке `fix-me` оставлен как ручной дублёр для человека — им
+# запускают прогон без Temporal, когда цикл почему-то не поднялся.
+#
+# Токен по умолчанию — штатный GITHUB_TOKEN раннера: PR-Agent здесь работает как
+# GitHub App по вебхуку, а вебхуки App приходят независимо от того, кто автор PR.
+# Секрет `PAT_TOKEN` перебивает его и нужен ровно в одном случае: если ревью
+# переведут обратно на GitHub Actions. PR, созданный GITHUB_TOKEN, НЕ порождает
+# событий workflow, и Actions-ревью на нём не запустилось бы.
+name: OpenHands Resolver
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue, который берём в разработку
+        required: true
+      research_branch:
+        description: Ветка с артефактами аналитики (пусто — аналитики не было)
+        required: false
+        default: ''
+      priority:
+        description: Приоритет задачи по формуле Issue-Agent
+        required: false
+        default: ''
+  issues:
+    types: [labeled]
+
+# Права выданы job'ам явно и минимально: ветка и коммит (contents), SubIssue по
+# найденным edge-кейсам (issues), сам PR (pull-requests).
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  # Рубильник человека — отдельным job, а не первым шагом разработки. Причина не
+  # косметическая: упавший шаг внутри `develop` сделал бы весь прогон `failure`,
+  # и финальный доклад (`if: always()`) сообщил бы циклу «разработка сорвалась».
+  # Но `agents:off` — это не сбой, а решение человека забрать задачу себе, и
+  # докладывать о нём как о провале значит врать циклу. Отдельный job даёт
+  # третий исход: `develop` не запускается вовсе и не докладывает ничего.
+  gate:
+    name: проверка рубильника
+    runs-on: ubuntu-latest
+    # Ручной вход отрабатывает только по своей метке. Без этого условия job
+    # запускался бы на КАЖДОЙ метке, которую вешает триаж Issue-Agent, — то есть
+    # несколько раз подряд на каждой новой задаче.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.label.name == 'fix-me'
+    outputs:
+      go: ${{ steps.check.outputs.go }}
+    steps:
+      - id: check
+        # Правило R4 протокола агентов: проверка раньше первого обращения к LLM.
+        # Смысл в том, чтобы не тратить бюджет на то, что человек уже забрал себе.
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
+          ISSUE_NUMBER: ${{ github.event.inputs.issue_number || github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          labels=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+                     --json labels --jq '.labels[].name')
+          if grep -qix 'agents:off' <<<"$labels"; then
+            echo "::notice::agents:off на #$ISSUE_NUMBER — прогон не начинается"
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  develop:
+    name: разработка по Issue
+    runs-on: ubuntu-latest
+    needs: gate
+    if: needs.gate.outputs.go == 'true'
+    timeout-minutes: 45
+    # Ограничение на УРОВНЕ JOB, а не workflow. На уровне workflow оно убивало
+    # собственный прогон: каждая метка, которую вешает Issue-Agent, порождает
+    # событие `issues.labeled`, такой прогон попадает в ту же группу и, хотя все
+    # его job'ы пропускаются, всё равно вытесняет идущую разработку. Job в группу
+    # не входит, пока не запустился, поэтому пропущенные прогоны безвредны.
+    #
+    # Сама группа нужна: две ветки от одного Issue дают два PR с одним
+    # `Closes #N`, и корреляция события с задачей становится неоднозначной —
+    # ровно тот случай, который Issue-Agent отказывается разрешать догадкой.
+    concurrency:
+      group: openhands-${{ github.event.inputs.issue_number || github.event.issue.number }}
+      cancel-in-progress: true
+    outputs:
+      pr_number: ${{ steps.pr.outputs.number }}
+
+    env:
+      ISSUE_NUMBER: ${{ github.event.inputs.issue_number || github.event.issue.number }}
+      RESEARCH_BRANCH: ${{ github.event.inputs.research_branch }}
+      PRIORITY: ${{ github.event.inputs.priority }}
+      # Токен виден и агенту: SubIssue по найденным edge-кейсам он заводит сам,
+      # своим `gh issue create` изнутри прогона.
+      GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
+      GITHUB_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Полная история: ветку работы заводим от main, а diff считаем от него же.
+          fetch-depth: 0
+          token: ${{ secrets.PAT_TOKEN || github.token }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Версия точная, не плавающая: у setup-uv нет тегов-мажоров выше v8 —
+      # `@v10` не резолвится вовсе, и прогон падает на подготовке job'а.
+      - uses: astral-sh/setup-uv@v10.0.1
+
+      - name: Установить OpenHands
+        run: uv tool install openhands --python 3.12
+
+      - name: Собрать постановку для агента
+        # Постановка собирается ЗДЕСЬ, а не в промпте агента: то, что уехало в
+        # работу, должно быть видно в логе прогона дословно. Иначе на разборе
+        # «почему агент сделал не то» нечего предъявить.
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/oh"
+          task="$RUNNER_TEMP/oh/task.md"
+
+          {
+            echo "# Задача: реализовать Issue #$ISSUE_NUMBER"
+            echo
+            gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --json title,body --template '## {{.title}}{{"\n\n"}}{{.body}}'
+            echo
+          } > "$task"
+
+          if [ -n "$RESEARCH_BRANCH" ] && git ls-remote --exit-code --heads origin "$RESEARCH_BRANCH" >/dev/null 2>&1; then
+            echo "## Системные требования (аналитика Issue-Agent)" >> "$task"
+            echo >> "$task"
+            git fetch --depth 1 origin "$RESEARCH_BRANCH"
+            # Каталог фиксирован сервисом аналитики (`FNR_DIR` в poh-issue-agents),
+            # ветка своя на каждый Issue. Порядок задан явно — требования первыми:
+            # то, что агент прочитает раньше, весит больше, а `task.md` и
+            # `concept.md` это путь к требованиям, а не сами требования.
+            # Отсутствующий файл — не сбой: набор артефактов у прогонов разный.
+            for f in system_requirements.md task.md concept.md; do
+              path="sa_documentation/FNR/FNR_1/$f"
+              if git cat-file -e "FETCH_HEAD:$path" 2>/dev/null; then
+                echo "### $f" >> "$task"
+                git show "FETCH_HEAD:$path" >> "$task"
+                echo >> "$task"
+              fi
+            done
+          else
+            echo "## Аналитики по задаче нет — работай от тела Issue." >> "$task"
+            echo >> "$task"
+          fi
+
+          # Правила работы лежат файлом в репозитории, а не строкой внутри
+          # workflow: их правит тот, кто правит конвенции проекта, и держать их
+          # в YAML значило бы прятать контракт от того, кому он адресован.
+          cat .openhands/task-rules.md >> "$task"
+
+          echo "::group::постановка, ушедшая агенту"
+          cat "$task"
+          echo "::endgroup::"
+
+      - name: Ветка работы
+        run: |
+          set -euo pipefail
+          git config user.name  "openhands-agent"
+          git config user.email "openhands-agent@users.noreply.github.com"
+          echo "WORK_BRANCH=feature/${ISSUE_NUMBER}-openhands" >> "$GITHUB_ENV"
+          git checkout -b "feature/${ISSUE_NUMBER}-openhands"
+
+      - name: Прогон OpenHands
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || 'openai/glm-4.6' }}
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL || 'https://api.z.ai/api/coding/paas/v4' }}
+          OPENHANDS_SUPPRESS_BANNER: '1'
+        run: |
+          set -euo pipefail
+          openhands --headless --override-with-envs -f "$RUNNER_TEMP/oh/task.md"
+
+      - name: Проверки
+        # Тот же прогон, что и в CI. Гоняется ЗДЕСЬ, а не только на PR: PR,
+        # созданный GITHUB_TOKEN, не порождает событий workflow, поэтому CI на
+        # нём не запускается вовсе. Без этого шага красный код уезжал бы в PR
+        # без единого признака того, что он красный.
+        #
+        # Падение здесь останавливает прогон до пуша: ветки и PR не будет, а
+        # цикл получит доклад о провале и вернёт задачу человеку.
+        run: node --test "tests/*.test.mjs"
+
+      - name: Коммит и пуш
+        id: push
+        run: |
+          set -euo pipefail
+          git add -A
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::агент не изменил ни одного файла"
+            exit 0
+          fi
+          git commit \
+            -m "feat(#${ISSUE_NUMBER}): реализация по системным требованиям" \
+            -m "Автор изменений — OpenHands, запущен активностью Develop по Issue #${ISSUE_NUMBER}."
+          git push -u origin "$WORK_BRANCH"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Открыть PR
+        id: pr
+        if: steps.push.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          # `Closes #N` — сквозной ключ цепочки: по нему Issue-Agent связывает PR
+          # с задачей, а GitHub закрывает её при слиянии.
+          body="$RUNNER_TEMP/oh/pr-body.md"
+          {
+            printf 'Closes #%s\n\n' "$ISSUE_NUMBER"
+            printf 'Разработку вёл OpenHands по системным требованиям из `%s`.\n' "${RESEARCH_BRANCH:-—}"
+            printf 'Найденные по дороге edge-кейсы вынесены отдельными SubIssue и в этой ветке не чинились.\n\n'
+            printf '<sub>origin: agent · root-issue: #%s</sub>\n' "$ISSUE_NUMBER"
+          } > "$body"
+
+          title=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json title --jq .title)
+          url=$(gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
+            --base main \
+            --head "$WORK_BRANCH" \
+            --title "feat(#${ISSUE_NUMBER}): ${title}" \
+            --body-file "$body")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "number=$(gh pr view "$url" --json number --jq .number)" >> "$GITHUB_OUTPUT"
+
+      - name: Доложить в цикл Issue
+        # Событие уходит ВСЕГДА (`if: always()`): цикл ждёт в фазе
+        # `in-development`, и молчание провалившегося прогона оставило бы Issue
+        # там навсегда. Нечем доложить — тоже факт, и он должен дойти.
+        if: always()
+        env:
+          ISSUE_AGENT_URL: ${{ secrets.ISSUE_AGENT_URL }}
+          AGENT_EVENT_SECRET: ${{ secrets.AGENT_EVENT_SECRET }}
+          PR_URL: ${{ steps.pr.outputs.url }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ISSUE_AGENT_URL:-}" ] || [ -z "${AGENT_EVENT_SECRET:-}" ]; then
+            echo "::warning::ISSUE_AGENT_URL/AGENT_EVENT_SECRET не заданы — событие не отправлено"
+            exit 0
+          fi
+
+          if [ "$JOB_STATUS" = "success" ] && [ -n "${PR_NUMBER:-}" ]; then
+            status=started; phase=pr-open
+            detail="OpenHands открыл PR ${PR_URL} — Closes #${ISSUE_NUMBER}"
+            ref="$PR_NUMBER"
+          else
+            status=failed; phase=in-development
+            detail="Прогон OpenHands завершился как ${JOB_STATUS}, PR не открыт: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            ref="run-${GITHUB_RUN_ID}"
+          fi
+
+          payload=$(jq -nc \
+            --arg repo "$GITHUB_REPOSITORY" --arg phase "$phase" --arg status "$status" \
+            --arg ref "$ref" --arg detail "$detail" --argjson root "$ISSUE_NUMBER" \
+            '{repo:$repo, agent:"openhands", phase:$phase, status:$status,
+              ref:$ref, root_issue:$root, detail:$detail}')
+
+          sig="sha256=$(printf '%s' "$payload" \
+            | openssl dgst -sha256 -hmac "$AGENT_EVENT_SECRET" -r | cut -d' ' -f1)"
+
+          curl -sS --fail-with-body -X POST "${ISSUE_AGENT_URL%/}/agent-event" \
+            -H 'Content-Type: application/json' \
+            -H "X-Agent-Signature-256: $sig" \
+            -d "$payload"
+
+  # Ревью вызовом, а не отдельным триггером: PR, созданный GITHUB_TOKEN, не
+  # порождает событий workflow, и ревью по `pull_request` на нём не запустилось
+  # бы никогда. Вызванный workflow идёт частью этого же прогона.
+  review:
+    name: ревью открытого PR
+    needs: develop
+    if: needs.develop.outputs.pr_number != ''
+    uses: ./.github/workflows/pr-review.yml
+    with:
+      pr_number: ${{ needs.develop.outputs.pr_number }}
+      root_issue: ${{ github.event.inputs.issue_number || github.event.issue.number }}
+    secrets: inherit
+</file>
+
+<file path=".github/workflows/pr-review.yml">
+# Ревью PR (PR-Agent на GLM) + доклад в цикл Issue.
+#
+# Два входа, один код ревью:
+#
+#   workflow_call   — вызов из прогона разработки сразу после открытия PR.
+#                     Именно вызов, а не отдельный триггер: PR, созданный
+#                     GITHUB_TOKEN, НЕ порождает событий workflow (правило
+#                     GitHub против рекурсии), и ревью по событию `pull_request`
+#                     на таком PR не запустилось бы никогда. Вызванный workflow
+#                     идёт частью того же прогона и этого ограничения не знает.
+#
+#   issue_comment   — повторная проверка после правок: человек (или Claude Code)
+#                     пишет `/review` в PR. Комментарий от живого пользователя
+#                     события порождает, здесь ограничения нет.
+#
+# Ревью гоняется CLI-образом pr-agent, а не GitHub Action'ом: action читает
+# событие прогона и на `workflow_call` не нашёл бы PR, о котором речь. CLI
+# принимает адрес PR явным аргументом и одинаково работает с обоих входов.
+name: PR Review
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        required: true
+        type: string
+      root_issue:
+        required: false
+        type: string
+        default: ''
+  issue_comment:
+    types: [created]
+
+  #   pull_request    — PR открыл агент разработки, который живёт НЕ в Actions.
+  #                     В режиме `local` контур пишет код и открывает PR внутри
+  #                     стенда, своим GitHub App: `openhands-resolver.yml` не
+  #                     запускается вовсе, а значит `workflow_call` некому
+  #                     сделать. Ревью не начиналось никогда, цикл оставался в
+  #                     фазе `pr-open` до истечения срока — и выглядело это как
+  #                     зависший PR-Agent. Токен App не GITHUB_TOKEN, поэтому
+  #                     правило GitHub против рекурсии здесь не действует и
+  #                     событие приходит.
+  pull_request:
+    types: [opened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+    name: ревью PR
+    runs-on: ubuntu-latest
+    # Вход различается по `inputs`, а НЕ по `github.event_name`: вызванный
+    # workflow наследует контекст вызывающего, и `event_name` там показывает
+    # исходное событие (`workflow_dispatch`), а не `workflow_call`. Условие на
+    # `event_name` молча пропускало ревью после каждой разработки.
+    #
+    # Для комментария: только в PR и только команда `/review`. Фильтр по
+    # `user.type != 'Bot'` снят: перепроверку после круга правок запрашивает сам
+    # цикл, и пишет он токеном GitHub App — то есть ботом. С фильтром круг
+    # правок вносил изменения и ждал ревью, которое не запускалось. Петли это не
+    # создаёт: ни один ответ агентов не начинается с `/review`, а число кругов
+    # ограничено PR_FIX_MAX_ROUNDS.
+    if: >-
+      inputs.pr_number != '' ||
+      github.event_name == 'pull_request' ||
+      (github.event.issue.pull_request != null &&
+       startsWith(github.event.comment.body, '/review'))
+    timeout-minutes: 20
+
+    env:
+      PR_NUMBER: ${{ inputs.pr_number || github.event.pull_request.number || github.event.issue.number }}
+      GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
+
+    steps:
+      - name: Рубильник человека
+        # Правило R4: проверка раньше первого обращения к LLM. `agents:off` на
+        # PR либо на связанном Issue останавливает ревью до траты бюджета.
+        id: gate
+        run: |
+          set -euo pipefail
+          labels=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+                     --json labels --jq '.labels[].name')
+          if grep -qix 'agents:off' <<<"$labels"; then
+            echo "::notice::agents:off на PR #$PR_NUMBER — ревью не запускается"
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Ревью
+        id: review
+        if: steps.gate.outputs.go == 'true'
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_MODEL: ${{ vars.PR_AGENT_MODEL || 'openai/glm-4.6' }}
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL || 'https://api.z.ai/api/coding/paas/v4' }}
+        run: |
+          set -uo pipefail
+          url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/pull/${PR_NUMBER}"
+
+          # pr-agent ВЫХОДИТ НУЛЁМ, даже когда ревью не состоялось: на
+          # rate-limit модели он пишет `Failed to review PR` в лог, оставляет в
+          # PR заглушку «Preparing review...» и завершается успешно. Шаг Actions
+          # отчитывался успехом, цикл получал `status=started`, и круг правок
+          # уходил доводить PR по пустому тексту. Поэтому исход определяется по
+          # выводу, а не по коду возврата.
+          review() {
+            # persistent_comment (дефолт) переписывает ОДИН верхний комментарий
+            # «PR Reviewer Guide» вместо того, чтобы плодить новый на каждый круг.
+            # Именно поэтому «замечаний нет» видно как исчезнувший пункт, а не как
+            # отдельное сообщение.
+            docker run --rm \
+              -e "OPENAI.KEY=${LLM_API_KEY}" \
+              -e "OPENAI.API_BASE=${LLM_BASE_URL}" \
+              -e "CONFIG.MODEL=${LLM_MODEL}" \
+              -e "CONFIG.FALLBACK_MODELS=[]" \
+              -e "CONFIG.CUSTOM_MODEL_MAX_TOKENS=128000" \
+              -e "CONFIG.GIT_PROVIDER=github" \
+              -e "CONFIG.PUBLISH_OUTPUT=true" \
+              -e "GITHUB.USER_TOKEN=${GH_TOKEN}" \
+              -e "GITHUB.DEPLOYMENT_TYPE=user" \
+              codiumai/pr-agent:latest --pr_url "$url" review 2>&1 | tee /tmp/review.log
+            ! grep -q "Failed to review PR" /tmp/review.log
+          }
+
+          # Один повтор с паузой: rate-limit — состояние на минуту, а не отказ.
+          # Больше одного не нужно: если ключ выбран надолго, PR подождёт
+          # человека, а не будет жечь минуты раннера.
+          review && exit 0
+          echo "::warning::ревью не удалось с первого раза — повтор через 90 с"
+          sleep 90
+          review
+
+      - name: Доложить в цикл Issue
+        # Уходит всегда: цикл ждёт в фазе `pr-open`, и молчание провалившегося
+        # ревью оставило бы задачу там навсегда. Нечем доложить — тоже факт.
+        if: always() && steps.gate.outputs.go == 'true'
+        env:
+          ISSUE_AGENT_URL: ${{ secrets.ISSUE_AGENT_URL }}
+          AGENT_EVENT_SECRET: ${{ secrets.AGENT_EVENT_SECRET }}
+          ROOT_ISSUE: ${{ inputs.root_issue }}
+          REVIEW_OUTCOME: ${{ steps.review.outcome }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ISSUE_AGENT_URL:-}" ] || [ -z "${AGENT_EVENT_SECRET:-}" ]; then
+            echo "::warning::ISSUE_AGENT_URL/AGENT_EVENT_SECRET не заданы — событие не отправлено"
+            exit 0
+          fi
+
+          # Ключ задачи: из входа вызова, иначе из тела PR. Несколько `Closes #N`
+          # оставляют ключ пустым намеренно — выбрать первый попавшийся значит
+          # привязать работу не к той задаче.
+          root="$ROOT_ISSUE"
+          if [ -z "$root" ]; then
+            body=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+            mapfile -t found < <(grep -oiE '\b(close[sd]?|fix(e[sd])?|resolve[sd]?)[: ]+#[0-9]+' <<<"$body" \
+                                 | grep -oE '[0-9]+' | sort -u)
+            [ "${#found[@]}" -eq 1 ] && root="${found[0]}"
+          fi
+
+          if [ "$REVIEW_OUTCOME" = "success" ]; then
+            status=started
+            detail="PR-Agent опубликовал ревью на PR #${PR_NUMBER}"
+          else
+            status=failed
+            detail="Ревью не выполнено: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          fi
+
+          # Ревизия, по которой шло ревью, входит в ключ идемпотентности цикла.
+          # Без неё каждый круг правок докладывал одну и ту же тройку
+          # `(ref, phase, status)`, второй доклад отбрасывался как повторная
+          # доставка — и круг правок физически не мог пройти дважды.
+          revision=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+                       --json headRefOid --jq .headRefOid)
+
+          payload=$(jq -nc --arg repo "$GITHUB_REPOSITORY" --arg status "$status" \
+            --arg ref "$PR_NUMBER" --arg detail "$detail" --arg root "$root" \
+            --arg revision "$revision" \
+            '{repo:$repo, agent:"pr-agent", phase:"pr-review", status:$status,
+              ref:$ref, detail:$detail, revision:$revision}
+             + (if $root == "" then {} else {root_issue: ($root|tonumber)} end)')
+
+          sig="sha256=$(printf '%s' "$payload" \
+            | openssl dgst -sha256 -hmac "$AGENT_EVENT_SECRET" -r | cut -d' ' -f1)"
+
+          curl -sS --fail-with-body -X POST "${ISSUE_AGENT_URL%/}/agent-event" \
+            -H 'Content-Type: application/json' \
+            -H "X-Agent-Signature-256: $sig" \
+            -d "$payload"
+</file>
+
+<file path=".openhands/task-rules.md">
+## Как работать
+
+Правила репозитория — в `CLAUDE.md` и `AGENTS.md`, они обязательны. Ключевое:
+
+1. **MVP первым.** Делай кратчайший путь к HowToDemo из Issue. Не углубляйся в
+   надёжность, оптимизацию и редкие ветки, пока MVP не работает.
+
+2. **Edge-кейс — не в эту ветку.** Любой найденный по дороге edge-кейс, риск или
+   «надо бы потом учесть» в текущей ветке НЕ чинишь. Запиши его в файл
+   `.followups.md` в корне рабочего каталога — по одному разделу на находку:
+
+   ```markdown
+   ## Отрицательная цена позиции проходит в расчёт
+
+   `subtotal` проверяет `price < 0` уже после умножения на `qty`
+   (src/pricing.mjs:26). Всплывёт на импорте прайса из внешней системы.
+   ```
+
+   Issue по находкам заведёт контур — своим токеном, с `origin:agent` и ключом
+   цепочки `root-issue: #N`, и сам оставит ссылки комментарием в родителе.
+   `gh` и GITHUB_TOKEN тебе не дают намеренно: ты исполняешь код репозитория, и
+   токен рядом с этим кодом — лишний радиус поражения.
+
+   Ничего честно незакрытого не нашёл — файла не создавай. Выдумывать находки
+   ради галочки не надо.
+
+3. **Тесты.** Прогоняй ту же проверку, что и CI (`.github/workflows/ci.yml`):
+   `node --test "tests/*.test.mjs"`. Новая логика — новый тест: правка расчёта
+   без теста на неё в этом репозитории считается незавершённой.
+   Красный прогон в PR не отдаём.
+
+4. **Коммитить самому не надо** — коммит, пуш и PR делает workflow после тебя.
+   Просто оставь рабочее дерево в нужном состоянии.
+</file>
+
+<file path="src/pricing.mjs">
+// Расчёт стоимости заказа. Чистые функции без ввода-вывода: цена — то, что
+// проверяется тестом построчно, и подмешивать сюда сеть значило бы проверять
+// вместе с ней.
+
+export const DELIVERY_FEE = 300;
+
+// Порог бесплатной доставки. Заказ ровно на пороге доставку уже не платит:
+// «от 3000» в тексте оферты означает включительно, и расхождение здесь стоило
+// бы дороже, чем читается.
+export const FREE_DELIVERY_FROM = 3000;
+
+// Минимальная сумма заказа для оформления.
+export const MIN_ORDER_AMOUNT = 1000;
+
+/**
+ * Позиция заказа: цена за штуку в рублях и количество.
+ * @typedef {{sku: string, price: number, qty: number}} Item
+ */
+
+/**
+ * Сумма позиций без доставки.
+ * @param {Item[]} items
+ */
+export function subtotal(items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error('заказ без позиций');
+  }
+  return items.reduce((sum, item) => {
+    if (!Number.isFinite(item.price) || item.price < 0) {
+      throw new Error(`некорректная цена в позиции ${item.sku}`);
+    }
+    if (!Number.isInteger(item.qty) || item.qty <= 0) {
+      throw new Error(`некорректное количество в позиции ${item.sku}`);
+    }
+    return sum + item.price * item.qty;
+  }, 0);
+}
+
+/**
+ * Стоимость доставки для суммы заказа.
+ * @param {number} amount
+ */
+export function deliveryFee(amount) {
+  return amount >= FREE_DELIVERY_FROM ? 0 : DELIVERY_FEE;
+}
+
+/**
+ * Итог заказа: позиции, доставка, сумма к оплате.
+ * @param {Item[]} items
+ */
+export function quote(items) {
+  const goods = subtotal(items);
+  if (goods < MIN_ORDER_AMOUNT) {
+    throw new Error(`минимальная сумма заказа ${MIN_ORDER_AMOUNT}, не хватает ${MIN_ORDER_AMOUNT - goods}`);
+  }
+  const delivery = deliveryFee(goods);
+  return { goods, delivery, total: goods + delivery };
+}
+</file>
+
+<file path="src/server.mjs">
+// HTTP-обёртка вокруг расчёта. Тонкая намеренно: вся арифметика в pricing.mjs
+// и проверяется без сети, здесь остаётся только разбор запроса и коды ответов.
+
+import { createServer } from 'node:http';
+
+import { quote } from './pricing.mjs';
+
+const PORT = Number(process.env.PORT || 8080);
+
+function send(res, code, body) {
+  const payload = JSON.stringify(body);
+  res.writeHead(code, {
+    'content-type': 'application/json; charset=utf-8',
+    'content-length': Buffer.byteLength(payload),
+  });
+  res.end(payload);
+}
+
+async function readJson(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  if (chunks.length === 0) return null;
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+}
+
+export const app = async (req, res) => {
+  if (req.url === '/healthz') return send(res, 200, { ok: true });
+
+  if (req.url === '/quote' && req.method === 'POST') {
+    let body;
+    try {
+      body = await readJson(req);
+    } catch {
+      // Битый JSON — ошибка запроса, а не сервера: 500 здесь увёл бы разбор в
+      // логи сервиса вместо ответа клиенту.
+      return send(res, 400, { error: 'тело запроса не разобралось как JSON' });
+    }
+    try {
+      return send(res, 200, quote(body?.items));
+    } catch (err) {
+      return send(res, 400, { error: err.message });
+    }
+  }
+
+  return send(res, 404, { error: 'не найдено' });
+};
+
+// Запуск только при прямом вызове: тест импортирует `app` и поднимать порт
+// ради этого не должен.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  createServer(app).listen(PORT, () => {
+    console.log(`checkout слушает :${PORT}`);
+  });
+}
+</file>
+
+<file path="tests/pricing.test.mjs">
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+
+import {
+  MIN_ORDER_AMOUNT,
+  DELIVERY_FEE,
+  FREE_DELIVERY_FROM,
+  deliveryFee,
+  quote,
+  subtotal,
+} from '../src/pricing.mjs';
+
+test('сумма позиций считается по количеству, а не по числу строк', () => {
+  assert.equal(subtotal([{ sku: 'a', price: 500, qty: 3 }]), 1500);
+});
+
+test('заказ без позиций — ошибка, а не ноль', () => {
+  // Ноль прошёл бы дальше как валидный заказ на 300 рублей доставки.
+  assert.throws(() => subtotal([]), /без позиций/);
+});
+
+test('отрицательная цена не проходит', () => {
+  assert.throws(() => subtotal([{ sku: 'a', price: -1, qty: 1 }]), /цена/);
+});
+
+test('дробное количество не проходит', () => {
+  assert.throws(() => subtotal([{ sku: 'a', price: 100, qty: 1.5 }]), /количество/);
+});
+
+test('доставка платная ниже порога', () => {
+  assert.equal(deliveryFee(FREE_DELIVERY_FROM - 1), DELIVERY_FEE);
+});
+
+test('на пороге доставка уже бесплатна', () => {
+  // «от 3000» в оферте означает включительно.
+  assert.equal(deliveryFee(FREE_DELIVERY_FROM), 0);
+});
+
+test('итог складывает товары и доставку', () => {
+  assert.deepEqual(quote([{ sku: 'a', price: 1000, qty: 1 }]), {
+    goods: 1000,
+    delivery: DELIVERY_FEE,
+    total: 1300,
+  });
+});
+
+test('заказ ниже минимальной суммы — ошибка с точной суммой нехватки', () => {
+  // Заказ на 500 руб при пороге 1000
+  assert.throws(() => quote([{ sku: 'a', price: 500, qty: 1 }]), /минимальная сумма/);
+});
+
+test('крупный заказ едет без платы за доставку', () => {
+  assert.deepEqual(quote([{ sku: 'a', price: 3500, qty: 1 }]), {
+    goods: 3500,
+    delivery: 0,
+    total: 3500,
+  });
+});
+</file>
+
+<file path=".gitignore">
+node_modules/
+.env
+
+# Находки агента разработки: постановка для контура, не часть правки.
+# В режиме local контур снимает файл сам; здесь — страховка от того, чтобы он
+# уехал в PR, если прогон шёл в чужих Actions.
+.followups.md
+</file>
+
+<file path="AGENTS.md">
+# AGENTS.md
+
+Постоянный контекст для агентов, работающих в этом репозитории. Полный свод
+правил — [`CLAUDE.md`](CLAUDE.md); здесь то, что обязано быть в голове ДО первой
+правки.
+
+## Назначение репозитория
+
+`poh-demo-checkout` — маленький сервис расчёта стоимости заказа. Он существует
+не ради себя: на нём гоняется полный цикл контура производства — Issue →
+аналитика → разработка → PR → ревью. Код намеренно простой, чтобы предметом
+разбора был контур, а не предметная область.
+
+## Структура
+
+- `src/pricing.mjs` — вся арифметика. Чистые функции без ввода-вывода
+- `src/server.mjs` — тонкая HTTP-обёртка: разбор запроса и коды ответов
+- `tests/pricing.test.mjs` — тесты расчёта (`node:test`)
+
+Зависимостей нет — это свойство сервиса, а не упущение. Новая зависимость
+заводится, только если задачу нечем закрыть из стандартной библиотеки, и причина
+записывается рядом с кодом.
+
+## Проверки
+
+Та же команда, что гоняет CI (`.github/workflows/ci.yml`):
+
+```bash
+node --test "tests/*.test.mjs"
+```
+
+Новая логика — новый тест. Правка расчёта без теста на неё считается
+незавершённой: расчёт здесь единственное, что вообще может сломаться молча.
+
+## Как агент ведёт работу
+
+**MVP первым, edge-кейсы — в SubIssue.** Граница MVP — раздел **HowToDemo** в
+Issue. Пока HowToDemo не проходит, делается только то, что к нему ведёт.
+
+Найденный по дороге edge-кейс, риск или «надо бы потом учесть» **не чинится в
+текущей ветке** — он записывается в `.followups.md` в корне рабочего каталога,
+по одному разделу на находку:
+
+```markdown
+## Отрицательная цена позиции проходит в расчёт
+
+`subtotal` проверяет `price < 0` уже после умножения на `qty`
+(src/pricing.mjs:26). Всплывёт на импорте прайса из внешней системы.
+```
+
+SubIssue по находкам заводит контур: своим токеном, с меткой `origin:agent` и
+ключом цепочки `root-issue: #N` в теле, и сам оставляет ссылки комментарием в
+родителе. По этим двум признакам контур отличает свой выход от входа: Issue с
+`origin:agent` проходит сокращённый триаж, а follow-up, порождённый
+follow-up-ом, уходит человеку вместо второго круга. Без них каждый PR начинал бы
+рождать Issue, а каждый Issue — PR.
+
+Заводить их самому нечем и не нужно: `gh` и GITHUB_TOKEN агенту разработки не
+дают намеренно — он исполняет код репозитория, и токен рядом с этим кодом лишний.
+
+**Ветка и PR несут номер Issue.** Ветка — `feature/<N>-<slug>`, PR — `Closes #N`
+в теле. Это сквозной ключ: по нему Issue-Agent и PR-Agent собирают один таймлайн
+из двух сервисов.
+
+**Хронология непрерывна.** Значимый шаг — комментарий в Issue, а не только в
+логе прогона: следующий агент восстанавливает контекст чтением одного Issue.
+
+## Чего не делать
+
+- Чинить edge-кейс «раз уж он рядом» и расширять scope ветки находками, не
+  блокирующими HowToDemo.
+- Заводить зависимость ради того, что закрывается стандартной библиотекой.
+- Переписывать `src/server.mjs` арифметикой: расчёт живёт в `pricing.mjs` и
+  проверяется без сети. Логика в обёртке — логика, которую тест не увидит.
+</file>
+
+<file path="CLAUDE.md">
+# CLAUDE.md
+
+Гайд для Claude Code в этом репозитории. Он же демо-стенд контура производства —
+здесь ходят Issue-Agent, OpenHands и PR-Agent, поэтому конвенции жёстче обычного:
+на них держится автоматика.
+
+## Git-workflow (обязательно)
+
+**Правило:** любая доработка ведётся через Issue. Цель — прозрачная хронология:
+любой агент восстанавливает контекст, читая один Issue, без раскопок в чате.
+
+1. **Issue первым делом.** Запрос на доработку → перед любым кодом заводится
+   Issue. Без Issue работа не начинается.
+2. **HowToDemo в Issue.** Конкретный сценарий, которым проверяется готовность:
+   что запустить, что сделать, что должно получиться. Это граница MVP. Нет
+   HowToDemo — нет критерия «готово».
+3. **Ветка = Issue.** `feature/<номер>-<slug>` либо `fix/<номер>-<slug>`.
+4. **PR = Issue.** `Closes #<номер>` в теле.
+5. **Хронология непрерывна.** Значимый шаг — комментарий в Issue.
+
+## MVP первым, edge-кейсы — в SubIssue (обязательно)
+
+Найденный по дороге edge-кейс **не берётся в работу сразу** — он выносится
+SubIssue с `root-issue: #N` и меткой `origin:agent`. К нему возвращаются после
+того, как MVP прошёл HowToDemo.
+
+Агент разработки заводит их не сам: он пишет находки в `.followups.md` в корне
+рабочего каталога (раздел `## <кратко>` на находку), а SubIssue по ним создаёт
+контур своим токеном. Токена у агента нет намеренно — он исполняет код
+репозитория.
+
+Единственное исключение — edge-кейс, без которого HowToDemo не проходит. Тогда
+это часть MVP, и надо явно сказать, чем именно он ломает демо.
+
+**DON'T:** чинить edge-кейс «раз уж он рядом»; расширять scope ветки находками,
+не блокирующими HowToDemo; держать находки только в чате — не зафиксированные
+SubIssue теряются.
+
+## Метки контура
+
+Их пишет автоматика, и правило простое: **одна метка — один писатель**.
+
+| Метка | Пишет | Смысл |
+|---|---|---|
+| `advisor:*`, `priority:*`, `phase:*` | Issue-Agent | классификация, приоритет, фаза задачи |
+| `research-me`, `build-me` | человек | запуск дорогой стадии |
+| `ready-for-dev` | Issue-Agent | задача подготовлена, можно брать в работу |
+| `origin:agent` | любой агент | артефакт создан агентом, а не человеком |
+| `agents:off` | человек | рубильник: агенты не трогают этот Issue |
+
+Чужую метку агент только читает.
+
+## Проверки
+
+```bash
+node --test "tests/*.test.mjs"
+```
+
+Новая логика — новый тест. Расчёт здесь единственное, что может сломаться молча.
+
+## Границы кода
+
+- Арифметика — в `src/pricing.mjs`, чистыми функциями. `src/server.mjs` только
+  разбирает запрос и отдаёт коды: логика в обёртке — логика, которую тест не
+  увидит.
+- Зависимостей у сервиса нет. Новая заводится, только если задачу нечем закрыть
+  из стандартной библиотеки, и причина пишется рядом с кодом.
+</file>
+
+<file path="DEMO.md">
+# Демо контура производства
+
+Сквозной прогон на этом репозитории: заявка превращается в задачу, задача — в
+системные требования, требования — в код, код — в отревьюенный PR. Человек
+вмешивается ровно один раз.
+
+Стенд поднимается одной командой — `poh-infra/harness`. Как поднять локально и
+что прописать снаружи: [`harness/LOCAL.md`](https://github.com/po-helper-org/poh-infra/blob/main/harness/LOCAL.md).
+
+---
+
+## Прогон, на котором это проверено
+
+Не сценарий, а факт: задача [#1](https://github.com/po-helper-org/poh-demo-checkout/issues/1)
+прошла путь целиком 2026-08-18, без ручного вмешательства между шагами.
+
+| Что смотреть | Где |
+|---|---|
+| Триаж и фазы | метки на [#1](https://github.com/po-helper-org/poh-demo-checkout/issues/1): `advisor:feature-request` → `priority:P3` → `phase:pr-review` |
+| Аналитика | ветка `research/issue-1`, каталог `sa_documentation/FNR/FNR_1/` |
+| Разработка | [PR #6](https://github.com/po-helper-org/poh-demo-checkout/pull/6): три файла, тестов стало 15 вместо 8 |
+| Декомпозиция | [SubIssue #4](https://github.com/po-helper-org/poh-demo-checkout/issues/4) — агент нашёл edge-кейс, завёл отдельно и не стал чинить в той же ветке |
+| Ревью | комментарий `PR Reviewer Guide 🔍` на PR #6 |
+
+---
+
+## Две активности контура
+
+| | Research | Develop |
+|---|---|---|
+| Работает с | Issue, текстом, аналитиком | веткой, кодом, PR |
+| Цель | превратить запрос в описанный документ: БФТ → системные требования → декомпозиция | взять Issue и автономно разработать, протестировать, открыть PR, довести по ревью |
+| Кто исполняет | цепочка FNR через `claude -p` в воркере | OpenHands headless на раннере GitHub Actions |
+| Видно в | Temporal: `IssueAnalysis` | Actions: `OpenHands Resolver` |
+
+Между ними — точка передачи `ready-for-dev`: единственное место, где контур сам
+отдаёт работу человеку. `DEVELOP_AUTOSTART=1` эту паузу снимает.
+
+---
+
+## Сценарий
+
+### Акт 1. Заявка становится задачей
+
+1. **Claude Code заводит Issue** по минорной фиче.
+2. **Вебхук поднимает workflow** — в Temporal появляется `IssueLifecycle`
+   с id `issue-<owner/repo>-<N>`. Стадии видны по мере прохождения.
+3. **Триаж отрабатывает сам**: `advisor:*` (что это за запрос), `priority:*`
+   (по формуле, с разбором в комментарии), `phase:classified`. Дальше цикл
+   паркуется и ждёт решения человека.
+
+Смотреть: Issue в GitHub и `IssueLifecycle` в Temporal UI одновременно — метка
+`phase:*` и стадия workflow показывают одно и то же состояние двум разным людям.
+
+### Акт 2. Research
+
+4. **Команда `/analyze`** комментарием (либо метка `run:analyze`).
+5. **Запускается `IssueAnalysis`** — отдельный workflow, видно в Temporal.
+   Внутри цепочка FNR: `task → concept → debate → sysreq → validate`,
+   каждая стадия отдельной активностью.
+6. **Результат**: ветка `research/issue-<N>` с артефактами в
+   `sa_documentation/FNR/FNR_1/`, комментарий со сводкой, фаза
+   `phase:system-requirements`.
+7. **Передача разработчику**: метка `ready-for-dev` и чеклист готовности —
+   что известно, с чего начать и **что осталось неопределённым** (строки
+   `[УТОЧНИТЬ]` вычитываются из самих артефактов).
+
+### Акт 3. Develop
+
+8. **Разработка стартует сама** (`DEVELOP_AUTOSTART=1`): активность Develop
+   диспатчит `openhands-resolver.yml` и паркует цикл в фазе `in-development`.
+9. **OpenHands работает на раннере**: читает Issue + системные требования +
+   `AGENTS.md`, пишет код, гоняет тесты.
+10. **Edge-кейсы уходят в SubIssue** — с `root-issue: #N` и меткой
+    `origin:agent`. В текущей ветке они не чинятся.
+11. **На каждый SubIssue поднимается свой `IssueLifecycle`** и проходит
+    сокращённый триаж: он уже классифицирован создателем, поэтому только дедуп
+    и приоритет.
+12. **PR открыт** с `Closes #N`; прогон докладывает событие `pr-open`, и фаза
+    задачи двигается сама.
+
+### Акт 4. Ревью
+
+13. **PR-Agent ревьюит** сразу после открытия PR — вызовом из того же прогона,
+    комментарий `PR Reviewer Guide 🔍`.
+14. **Claude Code вносит правки** и пишет `/review`.
+15. **Ревью перезапускается** и переписывает тот же комментарий на месте.
+    Замечание пропало — закрыто.
+16. **Задача готова к merge** и ждёт живого разработчика.
+
+---
+
+## Что показать в Temporal
+
+Одна лента на всю цепочку: `IssueLifecycle` живёт от заведения задачи до
+влитого PR, а дорогие стадии — `IssueAnalysis`, `IssueEstimation` — дочерние
+прогоны под ним. Ожидание человека и ожидание внешнего агента — это не пауза в
+коде, а состояние с дедлайном: задача, о которой забыли, эскалируется сама.
+
+## Границы, о которых честно сказать
+
+- **Код пишет OpenHands, а не контур.** Он живёт на раннере GitHub Actions:
+  своё окружение, свой sandboxing, свой счёт минут. Контур его запускает и
+  слушает доклад.
+- **Ревью не чек-лист «исправлено/нет».** `/review` заново ревьюит текущий
+  диф, а не сравнивает с прошлым прогоном. Пропало замечание — исправлено.
+- **Merge остаётся за человеком.** Контур доводит до состояния «готово к
+  слиянию» и останавливается.
+</file>
+
+<file path="package.json">
+{
+  "name": "poh-demo-checkout",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Демо-стенд контура производства: расчёт стоимости заказа",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test \"tests/*.test.mjs\""
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
+</file>
+
+<file path="README.md">
+# poh-demo-checkout
+
+Маленький сервис расчёта стоимости заказа. Существует не ради себя: это
+**демо-стенд контура производства** — на нём гоняется полный цикл от заявки до
+влитого PR, и код намеренно простой, чтобы предметом разбора был контур, а не
+предметная область.
+
+```
+Issue заведён
+  └─ Issue-Agent: триаж (advisor:* + priority:* + phase:classified)
+       └─ аналитика FNR → ветка research/issue-N + системные требования
+            ├─ остались вопросы [УТОЧНИТЬ] → комментарий и ожидание ответа
+            └─ декомпозиция → SubIssue по релизам MVP / GROW / SUPPORT
+                 └─ ready-for-dev + чеклист готовности
+                      └─ OpenHands: разработка → PR с Closes #N
+                           ├─ edge-кейсы по дороге → .followups.md → SubIssue
+                           └─ PR-Agent: ревью
+                                └─ круг правок → /review → «замечаний нет»
+```
+
+Подзадачи декомпозиции своей разработки НЕ заводят: весь объём MVP исполняет
+родитель одним прогоном и одним PR. Иначе на репозитории одновременно работали бы
+несколько агентов.
+
+## Сервис
+
+`POST /quote` считает заказ: сумму позиций, доставку и итог.
+
+```bash
+npm start
+curl -sX POST localhost:8080/quote \
+  -H 'content-type: application/json' \
+  -d '{"items":[{"sku":"a","price":1000,"qty":2}]}'
+# {"goods":2000,"delivery":300,"total":2300}
+```
+
+Доставка бесплатна от 3000 (включительно). Зависимостей у сервиса нет — это его
+свойство, а не упущение.
+
+## Проверки
+
+```bash
+node --test "tests/*.test.mjs"
+```
+
+## Автоматика
+
+| Workflow | Когда | Что делает |
+|---|---|---|
+| `ci.yml` | PR и push в main | тесты |
+| `openhands-resolver.yml` | диспатч от Issue-Agent (либо метка `fix-me`) | разработка по Issue → PR |
+| `pr-review.yml` | три входа: вызов из разработки, событие `pull_request`, команда `/review` в PR | ревью PR-Agent + доклад в цикл |
+
+Три входа у ревью не для надёжности, а по необходимости. PR, созданный
+`GITHUB_TOKEN`, событий workflow не порождает — оттуда вызов из разработки. PR,
+открытый контуром на своём сервере (режим `local`), Actions вообще не проходит —
+оттуда `pull_request`. Перепроверку после круга правок просит сам контур командой
+`/review`, и пишет он её токеном GitHub App, то есть ботом: фильтра по типу автора
+на этой команде нет намеренно.
+
+`pr-review.yml` определяет исход **по выводу** `pr-agent`, а не по коду возврата:
+на rate-limit модели тот пишет `Failed to review PR` в лог, оставляет в PR
+заглушку «Preparing review...» и завершается успешно. Доклад в цикл несёт
+`headRefOid` — коммит, по которому шло ревью: без него круги правок выглядели
+повторной доставкой одного и того же факта, и второй круг не начинался.
+
+Правила, по которым работают агенты, — в [`AGENTS.md`](AGENTS.md) и
+[`CLAUDE.md`](CLAUDE.md). Конфигурация контура целиком — `poh-infra/harness`.
+</file>
+
+</files>
