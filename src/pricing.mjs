@@ -9,6 +9,9 @@ export const DELIVERY_FEE = 300;
 // бы дороже, чем читается.
 export const FREE_DELIVERY_FROM = 3000;
 
+// Минимальная сумма заказа для оформления.
+export const MIN_ORDER_AMOUNT = 1000;
+
 /**
  * Позиция заказа: цена за штуку в рублях и количество.
  * @typedef {{sku: string, price: number, qty: number}} Item
@@ -47,6 +50,9 @@ export function deliveryFee(amount) {
  */
 export function quote(items) {
   const goods = subtotal(items);
+  if (goods < MIN_ORDER_AMOUNT) {
+    throw new Error(`минимальная сумма заказа ${MIN_ORDER_AMOUNT}, не хватает ${MIN_ORDER_AMOUNT - goods}`);
+  }
   const delivery = deliveryFee(goods);
   return { goods, delivery, total: goods + delivery };
 }
