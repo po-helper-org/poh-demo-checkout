@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  MIN_ORDER_AMOUNT,
   DELIVERY_FEE,
   FREE_DELIVERY_FROM,
   deliveryFee,
@@ -43,6 +44,11 @@ test('итог складывает товары и доставку', () => {
     promoStatus: 'none',
     total: 1300,
   });
+});
+
+test('заказ ниже минимальной суммы — ошибка с точной суммой нехватки', () => {
+  // Заказ на 500 руб при пороге 1000
+  assert.throws(() => quote([{ sku: 'a', price: 500, qty: 1 }]), /минимальная сумма/);
 });
 
 test('крупный заказ едет без платы за доставку', () => {

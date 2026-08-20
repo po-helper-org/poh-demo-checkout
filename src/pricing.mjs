@@ -9,6 +9,9 @@ export const DELIVERY_FEE = 300;
 // бы дороже, чем читается.
 export const FREE_DELIVERY_FROM = 3000;
 
+// Минимальная сумма заказа для оформления.
+export const MIN_ORDER_AMOUNT = 1000;
+
 // Реестр промокодов. При расширении типов скидок (фиксированная сумма, "2+1")
 // следует вынести логику в отдельный модуль.
 export const PROMO_CODES = {
@@ -54,6 +57,9 @@ export function deliveryFee(amount) {
  */
 export function quote(items, promoCode = null) {
   const goods = subtotal(items);
+  if (goods < MIN_ORDER_AMOUNT) {
+    throw new Error(`минимальная сумма заказа ${MIN_ORDER_AMOUNT}, не хватает ${MIN_ORDER_AMOUNT - goods}`);
+  }
   const delivery = deliveryFee(goods);
 
   let discount = 0;
