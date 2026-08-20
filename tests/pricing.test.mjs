@@ -39,6 +39,8 @@ test('итог складывает товары и доставку', () => {
   assert.deepEqual(quote([{ sku: 'a', price: 1000, qty: 1 }]), {
     goods: 1000,
     delivery: DELIVERY_FEE,
+    discount: 0,
+    promoStatus: 'none',
     total: 1300,
   });
 });
@@ -47,6 +49,48 @@ test('крупный заказ едет без платы за доставку
   assert.deepEqual(quote([{ sku: 'a', price: 3500, qty: 1 }]), {
     goods: 3500,
     delivery: 0,
+    discount: 0,
+    promoStatus: 'none',
     total: 3500,
   });
+});
+
+test('промокод не передан — статус none, скидка 0', () => {
+  assert.deepEqual(quote([{ sku: 'a', price: 1000, qty: 1 }]), {
+    goods: 1000,
+    delivery: DELIVERY_FEE,
+    discount: 0,
+    promoStatus: 'none',
+    total: 1300,
+  });
+});
+
+test('валидный промокод SALE10 даёт 10% скидки', () => {
+  assert.deepEqual(quote([{ sku: 'a', price: 1000, qty: 2 }], 'SALE10'), {
+    goods: 2000,
+    delivery: 300,
+    discount: 200,
+    promoStatus: 'applied',
+    total: 2100,
+  });
+});
+
+test('невалидный промокод — статус unknown, скидка 0', () => {
+  assert.deepEqual(quote([{ sku: 'a', price: 1000, qty: 1 }], 'INVALID'), {
+    goods: 1000,
+    delivery: DELIVERY_FEE,
+    discount: 0,
+    promoStatus: 'unknown',
+    total: 1300,
+  });
+});
+
+test('доставка не скидывается при применении промокода', () => {
+  // Товары на 2500, доставка 300. Скидка 10% = 250.
+  // Итог: 2500 - 250 + 300 = 2550 (доставка платная, т.к. goods ДО скидки = 2500 < 3000)
+  const result = quote([{ sku: 'a', price: 2500, qty: 1 }], 'SALE10');
+  assert.equal(result.goods, 2500);
+  assert.equal(result.discount, 250);
+  assert.equal(result.delivery, 300); // доставка считается по goods ДО скидки
+  assert.equal(result.total, 2550);
 });

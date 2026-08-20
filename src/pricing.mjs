@@ -9,6 +9,12 @@ export const DELIVERY_FEE = 300;
 // бы дороже, чем читается.
 export const FREE_DELIVERY_FROM = 3000;
 
+// Реестр промокодов. При расширении типов скидок (фиксированная сумма, "2+1")
+// следует вынести логику в отдельный модуль.
+export const PROMO_CODES = {
+  SALE10: { discount: 0.10, description: 'Скидка 10%' }
+};
+
 /**
  * Позиция заказа: цена за штуку в рублях и количество.
  * @typedef {{sku: string, price: number, qty: number}} Item
@@ -42,11 +48,28 @@ export function deliveryFee(amount) {
 }
 
 /**
- * Итог заказа: позиции, доставка, сумма к оплате.
+ * Итог заказа: позиции, доставка, скидка по промокоду, сумма к оплате.
  * @param {Item[]} items
+ * @param {string|null} promoCode — опциональный промокод
  */
-export function quote(items) {
+export function quote(items, promoCode = null) {
   const goods = subtotal(items);
   const delivery = deliveryFee(goods);
-  return { goods, delivery, total: goods + delivery };
+
+  let discount = 0;
+  let promoStatus = 'none';
+
+  if (promoCode) {
+    const promo = PROMO_CODES[promoCode];
+    if (promo) {
+      // Скидка только на товары, доставка не скидывается
+      discount = goods * promo.discount;
+      promoStatus = 'applied';
+    } else {
+      promoStatus = 'unknown';
+    }
+  }
+
+  // total = товары - скидка + доставка
+  return { goods, delivery, discount, promoStatus, total: goods - discount + delivery };
 }
