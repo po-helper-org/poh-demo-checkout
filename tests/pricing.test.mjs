@@ -43,6 +43,8 @@ test('итог складывает товары и доставку', () => {
     discount: 0,
     promoStatus: 'none',
     total: 1300,
+    payment: null,
+    paymentStatus: 'none',
   });
 });
 
@@ -58,6 +60,8 @@ test('крупный заказ едет без платы за доставку
     discount: 0,
     promoStatus: 'none',
     total: 3500,
+    payment: null,
+    paymentStatus: 'none',
   });
 });
 
@@ -68,6 +72,8 @@ test('промокод не передан — статус none, скидка 0
     discount: 0,
     promoStatus: 'none',
     total: 1300,
+    payment: null,
+    paymentStatus: 'none',
   });
 });
 
@@ -78,6 +84,8 @@ test('валидный промокод SALE10 даёт 10% скидки', () =>
     discount: 200,
     promoStatus: 'applied',
     total: 2100,
+    payment: null,
+    paymentStatus: 'none',
   });
 });
 
@@ -88,6 +96,8 @@ test('невалидный промокод — статус unknown, скидк
     discount: 0,
     promoStatus: 'unknown',
     total: 1300,
+    payment: null,
+    paymentStatus: 'none',
   });
 });
 
@@ -99,4 +109,71 @@ test('доставка не скидывается при применении �
   assert.equal(result.discount, 250);
   assert.equal(result.delivery, 300); // доставка считается по goods ДО скидки
   assert.equal(result.total, 2550);
+  assert.equal(result.payment, null);
+  assert.equal(result.paymentStatus, 'none');
+});
+
+// === Payment Method Tests ===
+
+test('paymentMethod=cloudpayments добавляет блок payment', () => {
+  const result = quote([{ sku: 'a', price: 1000, qty: 2 }], null, 'cloudpayments');
+  assert.equal(result.payment.provider, 'cloudpayments');
+  assert.equal(result.payment.amount, 2300);  // 2000 + 300 delivery
+  assert.equal(result.payment.currency, 'RUB');
+  assert.ok(result.payment.invoiceId);  // не пустой
+  assert.match(result.payment.invoiceId, /^INV-[0-9A-F]{8}-1$/);  // формат INV-XXXXXXXX-1
+  assert.equal(result.paymentStatus, 'ready');
+});
+
+test('paymentMethod с промокодом — payment.amount = total', () => {
+  const result = quote([{ sku: 'a', price: 1000, qty: 2 }], 'SALE10', 'cloudpayments');
+  assert.equal(result.goods, 2000);
+  assert.equal(result.discount, 200);  // 10% от 2000
+  assert.equal(result.total, 2100);  // 2000 - 200 + 300
+  assert.equal(result.payment.amount, 2100);
+  assert.equal(result.paymentStatus, 'ready');
+});
+
+test('невалидный paymentMethod — ошибка 400', () => {
+  assert.throws(() => quote([{ sku: 'a', price: 1000, qty: 1 }], null, 'stripe'), /неизвестный способ оплаты/);
+});
+
+test('без paymentMethod — статус none, payment=null', () => {
+  const result = quote([{ sku: 'a', price: 1000, qty: 1 }]);
+  assert.equal(result.paymentStatus, 'none');
+  assert.equal(result.payment, null);
+});
+
+test('invoiceSeq влияет на invoiceId', () => {
+  const items = [{ sku: 'a', price: 1000, qty: 1 }];
+  const result1 = quote(items, null, 'cloudpayments', 1);
+  const result2 = quote(items, null, 'cloudpayments', 2);
+  assert.notEqual(result1.payment.invoiceId, result2.payment.invoiceId);
+  assert.match(result1.payment.invoiceId, /-1$/);
+  assert.match(result2.payment.invoiceId, /-2$/);
+});
+
+test('invoiceId детерминирован для одного состава', () => {
+  const items = [{ sku: 'a', price: 1000, qty: 1 }];
+  const result1 = quote(items, 'SALE10', 'cloudpayments', 1);
+  const result2 = quote(items, 'SALE10', 'cloudpayments', 1);
+  assert.equal(result1.payment.invoiceId, result2.payment.invoiceId);
+});
+
+test('paymentMethod с бесплатной доставкой', () => {
+  const result = quote([{ sku: 'a', price: 3500, qty: 1 }], null, 'cloudpayments');
+  assert.equal(result.goods, 3500);
+  assert.equal(result.delivery, 0);
+  assert.equal(result.total, 3500);
+  assert.equal(result.payment.amount, 3500);
+  assert.equal(result.paymentStatus, 'ready');
+});
+
+test('paymentMethod с невалидным промокодом', () => {
+  const result = quote([{ sku: 'a', price: 1000, qty: 2 }], 'INVALID', 'cloudpayments');
+  assert.equal(result.promoStatus, 'unknown');
+  assert.equal(result.discount, 0);
+  assert.equal(result.total, 2300);  // 2000 + 300 delivery
+  assert.equal(result.payment.amount, 2300);
+  assert.equal(result.paymentStatus, 'ready');
 });

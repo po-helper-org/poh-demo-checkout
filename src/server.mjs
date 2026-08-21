@@ -36,7 +36,12 @@ export const app = async (req, res) => {
       return send(res, 400, { error: 'тело запроса не разобралось как JSON' });
     }
     try {
-      return send(res, 200, quote(body?.items, body?.promoCode));
+      return send(res, 200, quote(
+        body?.items,
+        body?.promoCode,
+        body?.paymentMethod,
+        body?.invoiceSeq
+      ));
     } catch (err) {
       return send(res, 400, { error: err.message });
     }
