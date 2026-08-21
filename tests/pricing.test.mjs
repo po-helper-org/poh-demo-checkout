@@ -134,10 +134,8 @@ test('paymentMethod с промокодом — payment.amount = total', () => {
   assert.equal(result.paymentStatus, 'ready');
 });
 
-test('невалидный paymentMethod — статус unknown, payment=null', () => {
-  const result = quote([{ sku: 'a', price: 1000, qty: 1 }], null, 'stripe');
-  assert.equal(result.paymentStatus, 'unknown');
-  assert.equal(result.payment, null);
+test('невалидный paymentMethod — ошибка 400', () => {
+  assert.throws(() => quote([{ sku: 'a', price: 1000, qty: 1 }], null, 'stripe'), /неизвестный способ оплаты/);
 });
 
 test('без paymentMethod — статус none, payment=null', () => {

@@ -125,7 +125,7 @@ export function quote(items, promoCode = null, paymentMethod = null, invoiceSeq 
       };
       paymentStatus = 'ready';
     } else {
-      paymentStatus = 'unknown';
+      throw new Error(`неизвестный способ оплаты: ${paymentMethod}`);
     }
   }
 
