@@ -25,7 +25,10 @@ async function readJson(req) {
 }
 
 export const app = async (req, res) => {
-  if (req.url === '/healthz') return send(res, 200, { ok: true });
+  if (req.url === '/healthz') return send(res, 200, {
+    status: 'ok',
+    uptime_sec: Math.floor(process.uptime())
+  });
 
   if (req.url === '/stats' && req.method === 'GET') {
     return send(res, 200, counters.getStats());
