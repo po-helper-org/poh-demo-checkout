@@ -9,6 +9,10 @@ export const DELIVERY_FEE = 300;
 // бы дороже, чем читается.
 export const FREE_DELIVERY_FROM = 3000;
 
+// Параметры упаковки: 50 ₽ за посылку, до 5 единиц товара в посылке.
+export const PACKAGING_FEE = 50;
+export const PACKAGES_CAPACITY = 5;
+
 // Минимальная сумма заказа для оформления.
 export const MIN_ORDER_AMOUNT = 1000;
 
@@ -62,6 +66,23 @@ export function deliveryFee(amount) {
 }
 
 /**
+ * Количество посылок для набора позиций.
+ * @param {Item[]} items
+ */
+export function countPackages(items) {
+  const units = items.reduce((sum, item) => sum + item.qty, 0);
+  return Math.ceil(units / PACKAGES_CAPACITY);
+}
+
+/**
+ * Стоимость упаковки для числа посылок.
+ * @param {number} packages
+ */
+export function packagingFee(packages) {
+  return packages * PACKAGING_FEE;
+}
+
+/**
  * Генерация invoiceId на основе хеша от состава заказа.
  * Детерминированный для одного состава, уникальный для разных попыток.
  * @param {Item[]} items — позиции заказа
@@ -83,7 +104,7 @@ function generateInvoiceId(items, promoCode, seq = 1) {
 }
 
 /**
- * Итог заказа: позиции, доставка, скидка по промокоду, способ оплаты, сумма.
+ * Итог заказа: позиции, посылки, доставка, скидка по промокоду, способ оплаты, сумма.
  * @param {Item[]} items
  * @param {string|null} promoCode — опциональный промокод
  * @param {string|null} paymentMethod — опциональный способ оплаты
@@ -94,7 +115,9 @@ export function quote(items, promoCode = null, paymentMethod = null, invoiceSeq 
   if (goods < MIN_ORDER_AMOUNT) {
     throw new Error(`минимальная сумма заказа ${MIN_ORDER_AMOUNT}, не хватает ${MIN_ORDER_AMOUNT - goods}`);
   }
-  const delivery = deliveryFee(goods);
+  
+  const packages = countPackages(items);
+  const delivery = deliveryFee(goods) + packagingFee(packages);
 
   let discount = 0;
   let promoStatus = 'none';
@@ -111,7 +134,7 @@ export function quote(items, promoCode = null, paymentMethod = null, invoiceSeq 
     }
   }
 
-  // total = товары - скидка + доставка
+  // total = товары - скидка + доставка (включая упаковку)
   const total = goods - discount + delivery;
 
   // Логика платежного метода
@@ -132,5 +155,5 @@ export function quote(items, promoCode = null, paymentMethod = null, invoiceSeq 
     }
   }
 
-  return { goods, delivery, discount, promoStatus, total, payment, paymentStatus };
+  return { goods, packages, delivery, discount, promoStatus, total, payment, paymentStatus };
 }
