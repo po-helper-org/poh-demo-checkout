@@ -77,6 +77,22 @@ test('промо-код WELCOME10 даёт 10% скидку', () => {
   assert.equal(result.promoStatus, 'applied');
 });
 
+test('отрицательная сумма заказа не проходит', () => {
+  assert.throws(() => deliveryFee(-100), /сумма заказа/);
+});
+
+test('промокод не передан — статус none, скидка 0', () => {
+  assert.deepEqual(quote([{ sku: 'a', price: 1000, qty: 1 }]), {
+    goods: 1000,
+    delivery: DELIVERY_FEE,
+    discount: 0,
+    promoStatus: 'none',
+    total: 1300,
+    payment: null,
+    paymentStatus: 'none',
+  });
+});
+
 test('промо-код SUMMER20 даёт 20% скидку', () => {
   const result = quote([{ sku: 'a', price: 3000, qty: 1 }], 'SUMMER20');
   assert.equal(result.goods, 3000);
