@@ -42,7 +42,12 @@ export const app = async (req, res) => {
       return send(res, 400, { error: 'тело запроса не разобралось как JSON' });
     }
     try {
-      const result = quote(body?.items, body?.promoCode);
+      const result = quote(
+        body?.items,
+        body?.promoCode,
+        body?.paymentMethod,
+        body?.invoiceSeq
+      );
       counters.incSuccess();
       return send(res, 200, result);
     } catch (err) {
