@@ -10,6 +10,7 @@ export const counters = (() => {
     /**
      * Инкремент счётчика посещений.
      * Вызывается при каждом POST /quote.
+     * @returns {void}
      */
     incVisit: () => {
       visits += 1;
@@ -18,6 +19,7 @@ export const counters = (() => {
     /**
      * Инкремент счётчика успешных транзакций.
      * Вызывается при каждом успешном quote() (HTTP 200).
+     * @returns {void}
      */
     incSuccess: () => {
       successes += 1;
