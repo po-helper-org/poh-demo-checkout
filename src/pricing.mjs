@@ -14,8 +14,14 @@ export const MIN_ORDER_AMOUNT = 1000;
 
 // Реестр промокодов. При расширении типов скидок (фиксированная сумма, "2+1")
 // следует вынести логику в отдельный модуль.
+// Поддерживает обе структуры: {percent, activeUntil} и {discount, description}
 export const PROMO_CODES = {
-  SALE10: { discount: 0.10, description: 'Скидка 10%' }
+  // Из feature/1-openhands
+  'WELCOME10': { percent: 10, activeUntil: null },
+  'SUMMER20': { percent: 20, activeUntil: '2026-09-01' },
+  'FALL15': { percent: 15, activeUntil: '2026-12-01' },
+  // Из origin/main
+  'SALE10': { discount: 0.10, description: 'Скидка 10%' }
 };
 
 // Реестр платежных провайдеров. При расширении — добавить новые записи.
@@ -25,7 +31,6 @@ export const PAYMENT_PROVIDERS = {
 
 // Валюта операций
 export const CURRENCY = 'RUB';
-
 /**
  * Позиция заказа: цена за штуку в рублях и количество.
  * @typedef {{sku: string, price: number, qty: number}} Item
@@ -62,6 +67,38 @@ export function deliveryFee(amount) {
 }
 
 /**
+ * Валидация промо-кода. Возвращает скидку или null для невалидного кода.
+ * Поддерживает обе структуры: {percent, activeUntil} и {discount, description}
+ * @param {string} code
+ * @param {Date} now
+ */
+function validatePromoCode(code, now = new Date()) {
+  const config = PROMO_CODES[code];
+  if (!config) return null;
+  
+  // Проверка срока действия для структуры с activeUntil
+  if (config.activeUntil && new Date(config.activeUntil) < now) return null;
+  
+  // Поддержка обеих структур discount/percent
+  const discount = config.discount !== undefined ? config.discount : (config.percent / 100);
+  return discount;
+}
+
+/**
+ * Расчёт суммы скидки в рублях.
+ * @param {number} goods
+ * @param {string|null} promoCode
+ */
+export function discountAmount(goods, promoCode) {
+  if (!promoCode) return 0;
+  const discount = validatePromoCode(promoCode);
+  if (discount === null) {
+    throw new Error('неизвестный промо-код');
+  }
+  return goods * discount;
+}
+
+/**
  * Генерация invoiceId на основе хеша от состава заказа.
  * Детерминированный для одного состава, уникальный для разных попыток.
  * @param {Item[]} items — позиции заказа
@@ -94,17 +131,17 @@ export function quote(items, promoCode = null, paymentMethod = null, invoiceSeq 
   if (goods < MIN_ORDER_AMOUNT) {
     throw new Error(`минимальная сумма заказа ${MIN_ORDER_AMOUNT}, не хватает ${MIN_ORDER_AMOUNT - goods}`);
   }
-  const delivery = deliveryFee(goods);
+  const delivery = deliveryFee(goods); // Порог считается ДО скидки
 
   let discount = 0;
   let promoStatus = 'none';
 
   if (promoCode) {
-    const promo = PROMO_CODES[promoCode];
-    if (promo) {
+    const discountValue = validatePromoCode(promoCode);
+    if (discountValue !== null) {
       // Скидка только на товары, доставка не скидывается
       // Округление до 2 знаков после запятой для избежания ошибок плавающей точки
-      discount = Math.round(goods * promo.discount * 100) / 100;
+      discount = Math.round(goods * discountValue * 100) / 100;
       promoStatus = 'applied';
     } else {
       promoStatus = 'unknown';

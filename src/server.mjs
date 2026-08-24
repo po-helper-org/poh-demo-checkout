@@ -42,9 +42,11 @@ export const app = async (req, res) => {
       return send(res, 400, { error: 'тело запроса не разобралось как JSON' });
     }
     try {
+      // Поддержка обоих параметров для обратной совместимости
+      const promoCode = body?.promoCode ?? body?.promo;
       const result = quote(
         body?.items,
-        body?.promoCode,
+        promoCode,
         body?.paymentMethod,
         body?.invoiceSeq
       );

@@ -8,6 +8,8 @@ import {
   deliveryFee,
   quote,
   subtotal,
+  discountAmount,
+  PROMO_CODES,
 } from '../src/pricing.mjs';
 
 test('сумма позиций считается по количеству, а не по числу строк', () => {
@@ -56,13 +58,23 @@ test('заказ ниже минимальной суммы — ошибка с 
 test('крупный заказ едет без платы за доставку', () => {
   assert.deepEqual(quote([{ sku: 'a', price: 3500, qty: 1 }]), {
     goods: 3500,
-    delivery: 0,
     discount: 0,
+    delivery: 0,
     promoStatus: 'none',
     total: 3500,
     payment: null,
     paymentStatus: 'none',
   });
+});
+
+// Промо-коды из feature/1-openhands
+test('промо-код WELCOME10 даёт 10% скидку', () => {
+  const result = quote([{ sku: 'a', price: 1000, qty: 2 }], 'WELCOME10');
+  assert.equal(result.goods, 2000);
+  assert.equal(result.discount, 200);
+  assert.equal(result.delivery, 300); // Порог не достигнут (2000 < 3000)
+  assert.equal(result.total, 2100);
+  assert.equal(result.promoStatus, 'applied');
 });
 
 test('отрицательная сумма заказа не проходит', () => {
@@ -81,25 +93,63 @@ test('промокод не передан — статус none, скидка 0
   });
 });
 
-test('валидный промокод SALE10 даёт 10% скидки', () => {
-  assert.deepEqual(quote([{ sku: 'a', price: 1000, qty: 2 }], 'SALE10'), {
-    goods: 2000,
-    delivery: 300,
-    discount: 200,
-    promoStatus: 'applied',
-    total: 2100,
-    payment: null,
-    paymentStatus: 'none',
-  });
+test('промо-код SUMMER20 даёт 20% скидку', () => {
+  const result = quote([{ sku: 'a', price: 3000, qty: 1 }], 'SUMMER20');
+  assert.equal(result.goods, 3000);
+  assert.equal(result.discount, 600);
+  assert.equal(result.delivery, 0); // Порог достигнут по goods (3000 >= 3000)
+  assert.equal(result.total, 2400);
+  assert.equal(result.promoStatus, 'applied');
 });
 
-test('невалидный промокод — статус unknown, скидка 0', () => {
+test('промо-код FALL15 даёт 15% скидку с бесплатной доставкой', () => {
+  const result = quote([{ sku: 'a', price: 3500, qty: 1 }], 'FALL15');
+  assert.equal(result.goods, 3500);
+  assert.equal(result.discount, 525);
+  assert.equal(result.delivery, 0);
+  assert.equal(result.total, 2975);
+  assert.equal(result.promoStatus, 'applied');
+});
+
+test('неизвестный промо-код — статус unknown, скидка 0', () => {
   assert.deepEqual(quote([{ sku: 'a', price: 1000, qty: 1 }], 'INVALID'), {
     goods: 1000,
     delivery: DELIVERY_FEE,
     discount: 0,
     promoStatus: 'unknown',
     total: 1300,
+    payment: null,
+    paymentStatus: 'none',
+  });
+});
+
+test('порог доставки считается до скидки', () => {
+  // 3000 товаров без скидки → доставка 0
+  // 3000 товаров со скидкой 20% → доставка всё ещё 0
+  const result = quote([{ sku: 'a', price: 3000, qty: 1 }], 'SUMMER20');
+  assert.equal(result.goods, 3000);
+  assert.equal(result.discount, 600);
+  assert.equal(result.delivery, 0); // Порог достигнут по goods (3000 >= 3000)
+  assert.equal(result.total, 2400);
+});
+
+test('discountAmount без кода возвращает 0', () => {
+  assert.equal(discountAmount(1000, null), 0);
+  assert.equal(discountAmount(1000, undefined), 0);
+});
+
+test('discountAmount с неизвестным кодом выбрасывает', () => {
+  assert.throws(() => discountAmount(1000, 'UNKNOWN'), /неизвестный промо-код/);
+});
+
+// Промо-коды из origin/main
+test('промокод SALE10 даёт 10% скидки', () => {
+  assert.deepEqual(quote([{ sku: 'a', price: 1000, qty: 2 }], 'SALE10'), {
+    goods: 2000,
+    delivery: 300,
+    discount: 200,
+    promoStatus: 'applied',
+    total: 2100,
     payment: null,
     paymentStatus: 'none',
   });
