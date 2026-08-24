@@ -4,6 +4,7 @@
 import { createServer } from 'node:http';
 
 import { quote } from './pricing.mjs';
+import { counters } from './metrics.mjs';
 
 const PORT = Number(process.env.PORT || 8080);
 
@@ -26,7 +27,12 @@ async function readJson(req) {
 export const app = async (req, res) => {
   if (req.url === '/healthz') return send(res, 200, { ok: true });
 
+  if (req.url === '/stats' && req.method === 'GET') {
+    return send(res, 200, counters.getStats());
+  }
+
   if (req.url === '/quote' && req.method === 'POST') {
+    counters.incVisit();
     let body;
     try {
       body = await readJson(req);
@@ -36,7 +42,16 @@ export const app = async (req, res) => {
       return send(res, 400, { error: 'тело запроса не разобралось как JSON' });
     }
     try {
-      return send(res, 200, quote(body?.items, body?.promo));
+      // Поддержка обоих параметров для обратной совместимости
+      const promoCode = body?.promoCode ?? body?.promo;
+      const result = quote(
+        body?.items,
+        promoCode,
+        body?.paymentMethod,
+        body?.invoiceSeq
+      );
+      counters.incSuccess();
+      return send(res, 200, result);
     } catch (err) {
       return send(res, 400, { error: err.message });
     }

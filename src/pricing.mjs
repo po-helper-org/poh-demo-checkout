@@ -9,14 +9,28 @@ export const DELIVERY_FEE = 300;
 // бы дороже, чем читается.
 export const FREE_DELIVERY_FROM = 3000;
 
-// Промо-коды для демо-стенда. В боевой системе это должен быть внешний
-// конфиг или сервис — Концепт 2b из system_requirements.md.
+// Минимальная сумма заказа для оформления.
+export const MIN_ORDER_AMOUNT = 1000;
+
+// Реестр промокодов. При расширении типов скидок (фиксированная сумма, "2+1")
+// следует вынести логику в отдельный модуль.
+// Поддерживает обе структуры: {percent, activeUntil} и {discount, description}
 export const PROMO_CODES = {
+  // Из feature/1-openhands
   'WELCOME10': { percent: 10, activeUntil: null },
   'SUMMER20': { percent: 20, activeUntil: '2026-09-01' },
   'FALL15': { percent: 15, activeUntil: '2026-12-01' },
+  // Из origin/main
+  'SALE10': { discount: 0.10, description: 'Скидка 10%' }
 };
 
+// Реестр платежных провайдеров. При расширении — добавить новые записи.
+export const PAYMENT_PROVIDERS = {
+  CLOUDPAYMENTS: 'cloudpayments'
+};
+
+// Валюта операций
+export const CURRENCY = 'RUB';
 /**
  * Позиция заказа: цена за штуку в рублях и количество.
  * @typedef {{sku: string, price: number, qty: number}} Item
@@ -50,15 +64,21 @@ export function deliveryFee(amount) {
 }
 
 /**
- * Валидация промо-кода. Возвращает процент скидки или null для невалидного кода.
+ * Валидация промо-кода. Возвращает скидку или null для невалидного кода.
+ * Поддерживает обе структуры: {percent, activeUntil} и {discount, description}
  * @param {string} code
  * @param {Date} now
  */
 function validatePromoCode(code, now = new Date()) {
   const config = PROMO_CODES[code];
   if (!config) return null;
+  
+  // Проверка срока действия для структуры с activeUntil
   if (config.activeUntil && new Date(config.activeUntil) < now) return null;
-  return config.percent;
+  
+  // Поддержка обеих структур discount/percent
+  const discount = config.discount !== undefined ? config.discount : (config.percent / 100);
+  return discount;
 }
 
 /**
@@ -68,21 +88,83 @@ function validatePromoCode(code, now = new Date()) {
  */
 export function discountAmount(goods, promoCode) {
   if (!promoCode) return 0;
-  const percent = validatePromoCode(promoCode);
-  if (percent === null) {
+  const discount = validatePromoCode(promoCode);
+  if (discount === null) {
     throw new Error('неизвестный промо-код');
   }
-  return goods * percent / 100;
+  return goods * discount;
 }
 
 /**
- * Итог заказа: позиции, скидка, доставка, сумма к оплате.
- * @param {Item[]} items
- * @param {string|null} promoCode
+ * Генерация invoiceId на основе хеша от состава заказа.
+ * Детерминированный для одного состава, уникальный для разных попыток.
+ * @param {Item[]} items — позиции заказа
+ * @param {string|null} promoCode — промокод (если есть)
+ * @param {number} seq — номер попытки (по умолчанию 1)
+ * @returns {string} — invoiceId формата INV-XXXXXXXX-NN
  */
-export function quote(items, promoCode = null) {
+function generateInvoiceId(items, promoCode, seq = 1) {
+  // Хеш только от состава заказа — детерминированность
+  const params = JSON.stringify({ items, promoCode });
+  let hash = 0;
+  for (let i = 0; i < params.length; i++) {
+    const char = params.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  const hashHex = Math.abs(hash).toString(16).toUpperCase().padStart(8, '0');
+  return `INV-${hashHex}-${seq}`;
+}
+
+/**
+ * Итог заказа: позиции, доставка, скидка по промокоду, способ оплаты, сумма.
+ * @param {Item[]} items
+ * @param {string|null} promoCode — опциональный промокод
+ * @param {string|null} paymentMethod — опциональный способ оплаты
+ * @param {number} invoiceSeq — номер попытки оплаты (для уникальности invoiceId)
+ */
+export function quote(items, promoCode = null, paymentMethod = null, invoiceSeq = 1) {
   const goods = subtotal(items);
-  const discount = discountAmount(goods, promoCode);
+  if (goods < MIN_ORDER_AMOUNT) {
+    throw new Error(`минимальная сумма заказа ${MIN_ORDER_AMOUNT}, не хватает ${MIN_ORDER_AMOUNT - goods}`);
+  }
   const delivery = deliveryFee(goods); // Порог считается ДО скидки
-  return { goods, discount, delivery, total: goods - discount + delivery };
+
+  let discount = 0;
+  let promoStatus = 'none';
+
+  if (promoCode) {
+    const discountValue = validatePromoCode(promoCode);
+    if (discountValue !== null) {
+      // Скидка только на товары, доставка не скидывается
+      // Округление до 2 знаков после запятой для избежания ошибок плавающей точки
+      discount = Math.round(goods * discountValue * 100) / 100;
+      promoStatus = 'applied';
+    } else {
+      promoStatus = 'unknown';
+    }
+  }
+
+  // total = товары - скидка + доставка
+  const total = goods - discount + delivery;
+
+  // Логика платежного метода
+  let payment = null;
+  let paymentStatus = 'none';
+
+  if (paymentMethod) {
+    if (paymentMethod === PAYMENT_PROVIDERS.CLOUDPAYMENTS) {
+      payment = {
+        provider: paymentMethod,
+        amount: total,
+        currency: CURRENCY,
+        invoiceId: generateInvoiceId(items, promoCode, invoiceSeq)
+      };
+      paymentStatus = 'ready';
+    } else {
+      throw new Error(`неизвестный способ оплаты: ${paymentMethod}`);
+    }
+  }
+
+  return { goods, delivery, discount, promoStatus, total, payment, paymentStatus };
 }
