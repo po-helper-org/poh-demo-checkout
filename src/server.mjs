@@ -50,7 +50,10 @@ export const app = async (req, res) => {
     });
   }
 
-  if (pathname === '/stats' && req.method === 'GET') {
+  if (pathname === '/stats') {
+    if (req.method !== 'GET') {
+      return send(res, 405, { error: 'Method Not Allowed' }, { 'Allow': 'GET' });
+    }
     return send(res, 200, counters.getStats());
   }
 

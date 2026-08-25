@@ -195,6 +195,27 @@ test('GET /stats с query string возвращает 200', async () => {
   assert.equal(typeof res.body.successes, 'number');
 });
 
+test('POST /stats возвращает 405 с заголовком Allow: GET', async () => {
+  const res = await request('/stats', 'POST');
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.body.error, 'Method Not Allowed');
+  assert.equal(res.headers['Allow'], 'GET');
+});
+
+test('PUT /stats возвращает 405 с заголовком Allow: GET', async () => {
+  const res = await request('/stats', 'PUT');
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.body.error, 'Method Not Allowed');
+  assert.equal(res.headers['Allow'], 'GET');
+});
+
+test('DELETE /stats возвращает 405 с заголовком Allow: GET', async () => {
+  const res = await request('/stats', 'DELETE');
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.body.error, 'Method Not Allowed');
+  assert.equal(res.headers['Allow'], 'GET');
+});
+
 // === Тесты валидации Content-Type ===
 
 test('POST /quote с Content-Type application/json возвращает 200', async () => {
