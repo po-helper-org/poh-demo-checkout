@@ -2,7 +2,7 @@
 // и проверяется без сети, здесь остаётся только разбор запроса и коды ответов.
 
 import { createServer } from 'node:http';
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, statSync, realpathSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -57,11 +57,10 @@ function serveStatic(url) {
   const filePath = join(STATIC_DIR, decodedPath);
   
   try {
-    // Security check: ensure file is within STATIC_DIR
-    const stats = statSync(filePath);
-    const realPath = filePath; // Use the resolved path
+    // Security: resolve the canonical path first before any file system operations
+    const realPath = realpathSync(filePath);
     
-    // Check if the path is within STATIC_DIR by comparing normalized paths
+    // Security check: ensure the resolved path is within STATIC_DIR
     const normalizedStatic = STATIC_DIR.replace(/\\/g, '/');
     const normalizedFile = realPath.replace(/\\/g, '/');
     
@@ -69,12 +68,13 @@ function serveStatic(url) {
       return null;
     }
     
-    // Only serve regular files
+    // Check if the path points to a regular file (after security validation)
+    const stats = statSync(realPath);
     if (!stats.isFile()) {
       return null;
     }
     
-    return filePath;
+    return realPath;
   } catch {
     return null;
   }
