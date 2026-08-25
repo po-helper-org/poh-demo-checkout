@@ -164,7 +164,8 @@ export function quote(items, promoCode = null, paymentMethod = null, invoiceSeq 
       };
       paymentStatus = 'ready';
     } else {
-      throw new Error(`неизвестный способ оплаты: ${paymentMethod}`);
+      const supportedMethods = Object.values(PAYMENT_PROVIDERS).join(', ');
+      throw new Error(`неизвестный способ оплаты: ${paymentMethod}. Доступные способы: ${supportedMethods}`);
     }
   }
 
