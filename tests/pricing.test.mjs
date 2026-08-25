@@ -138,8 +138,31 @@ test('discountAmount без кода возвращает 0', () => {
   assert.equal(discountAmount(1000, undefined), 0);
 });
 
-test('discountAmount с неизвестным кодом выбрасывает', () => {
-  assert.throws(() => discountAmount(1000, 'UNKNOWN'), /неизвестный промо-код/);
+test('discountAmount с неизвестным кодом возвращает 0', () => {
+  assert.equal(discountAmount(1000, 'UNKNOWN'), 0);
+});
+
+test('discountAmount с валидным кодом считает скидку', () => {
+  assert.equal(discountAmount(1000, 'WELCOME10'), 100);
+  assert.equal(discountAmount(2000, 'SUMMER20'), 400);
+});
+
+test('единое поведение функций при неизвестном промо-коде', () => {
+  const items = [{ sku: 'a', price: 1000, qty: 1 }];
+  const invalidCode = 'INVALID_CODE';
+  
+  // quote() возвращает скидку 0 и статус 'unknown'
+  const quoteResult = quote(items, invalidCode);
+  assert.equal(quoteResult.discount, 0);
+  assert.equal(quoteResult.promoStatus, 'unknown');
+  
+  // discountAmount() тоже возвращает 0 (то же поведение)
+  const goods = subtotal(items);
+  const discountResult = discountAmount(goods, invalidCode);
+  assert.equal(discountResult, 0);
+  
+  // Обе функции обрабатывают неизвестный код одинаково — возвращают 0
+  assert.equal(quoteResult.discount, discountResult);
 });
 
 // Промо-коды из origin/main
