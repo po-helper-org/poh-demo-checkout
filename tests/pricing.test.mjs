@@ -81,6 +81,22 @@ test('отрицательная сумма заказа не проходит',
   assert.throws(() => deliveryFee(-100), /сумма заказа/);
 });
 
+test('NaN в качестве суммы заказа не проходит', () => {
+  assert.throws(() => deliveryFee(NaN), /сумма заказа/);
+});
+
+test('граница порога: 2999 руб — доставка платная', () => {
+  assert.equal(deliveryFee(2999), DELIVERY_FEE);
+});
+
+test('граница порога: ровно 3000 руб — доставка бесплатна', () => {
+  assert.equal(deliveryFee(3000), 0);
+});
+
+test('граница порога: 3001 руб — доставка бесплатна', () => {
+  assert.equal(deliveryFee(3001), 0);
+});
+
 test('промокод не передан — статус none, скидка 0', () => {
   assert.deepEqual(quote([{ sku: 'a', price: 1000, qty: 1 }]), {
     goods: 1000,
