@@ -231,6 +231,16 @@ test('невалидный paymentMethod — ошибка 400', () => {
   assert.throws(() => quote([{ sku: 'a', price: 1000, qty: 1 }], null, 'stripe'), /неизвестный способ оплаты/);
 });
 
+test('ошибка неизвестного способа оплаты содержит список доступных', () => {
+  assert.throws(() => {
+    quote([{ sku: 'a', price: 1000, qty: 1 }], null, 'invalid_method');
+  }, /неизвестный способ оплаты: invalid_method/);
+  
+  assert.throws(() => {
+    quote([{ sku: 'a', price: 1000, qty: 1 }], null, 'invalid_method');
+  }, /Доступные способы: cloudpayments/);
+});
+
 test('без paymentMethod — статус none, payment=null', () => {
   const result = quote([{ sku: 'a', price: 1000, qty: 1 }]);
   assert.equal(result.paymentStatus, 'none');
