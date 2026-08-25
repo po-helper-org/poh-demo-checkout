@@ -139,3 +139,33 @@ test('GET /stats после нескольких запросов возвращ
   assert.equal(res.body.visits, beforeVisits + 2);
   assert.equal(res.body.successes, beforeSuccesses + 2);
 });
+
+test('GET /healthz возвращает 200 с данными о состоянии', async () => {
+  const res = await request('/healthz', 'GET');
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.status, 'ok');
+  assert.equal(typeof res.body.uptime_sec, 'number');
+  assert.ok(Number.isInteger(res.body.uptime_sec));
+  assert.ok(res.body.uptime_sec >= 0);
+});
+
+test('POST /healthz возвращает 405 с заголовком Allow: GET', async () => {
+  const res = await request('/healthz', 'POST');
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.body.error, 'Method Not Allowed');
+  assert.equal(res.headers['Allow'], 'GET');
+});
+
+test('PUT /healthz возвращает 405 с заголовком Allow: GET', async () => {
+  const res = await request('/healthz', 'PUT');
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.body.error, 'Method Not Allowed');
+  assert.equal(res.headers['Allow'], 'GET');
+});
+
+test('DELETE /healthz возвращает 405 с заголовком Allow: GET', async () => {
+  const res = await request('/healthz', 'DELETE');
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.body.error, 'Method Not Allowed');
+  assert.equal(res.headers['Allow'], 'GET');
+});

@@ -8,11 +8,12 @@ import { counters } from './metrics.mjs';
 
 const PORT = Number(process.env.PORT || 8080);
 
-function send(res, code, body) {
+function send(res, code, body, extraHeaders = {}) {
   const payload = JSON.stringify(body);
   res.writeHead(code, {
     'content-type': 'application/json; charset=utf-8',
     'content-length': Buffer.byteLength(payload),
+    ...extraHeaders
   });
   res.end(payload);
 }
@@ -25,10 +26,15 @@ async function readJson(req) {
 }
 
 export const app = async (req, res) => {
-  if (req.url === '/healthz') return send(res, 200, {
-    status: 'ok',
-    uptime_sec: Math.floor(process.uptime())
-  });
+  if (req.url === '/healthz') {
+    if (req.method !== 'GET') {
+      return send(res, 405, { error: 'Method Not Allowed' }, { 'Allow': 'GET' });
+    }
+    return send(res, 200, {
+      status: 'ok',
+      uptime_sec: Math.floor(process.uptime())
+    });
+  }
 
   if (req.url === '/stats' && req.method === 'GET') {
     return send(res, 200, counters.getStats());
