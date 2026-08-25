@@ -26,7 +26,10 @@ async function readJson(req) {
 }
 
 export const app = async (req, res) => {
-  if (req.url === '/healthz') {
+  const url = new URL(req.url, 'http://localhost');
+  const pathname = url.pathname;
+
+  if (pathname === '/healthz') {
     if (req.method !== 'GET') {
       return send(res, 405, { error: 'Method Not Allowed' }, { 'Allow': 'GET' });
     }
@@ -36,11 +39,11 @@ export const app = async (req, res) => {
     });
   }
 
-  if (req.url === '/stats' && req.method === 'GET') {
+  if (pathname === '/stats' && req.method === 'GET') {
     return send(res, 200, counters.getStats());
   }
 
-  if (req.url === '/quote' && req.method === 'POST') {
+  if (pathname === '/quote' && req.method === 'POST') {
     counters.incVisit();
     let body;
     try {

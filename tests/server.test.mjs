@@ -169,3 +169,36 @@ test('DELETE /healthz возвращает 405 с заголовком Allow: GE
   assert.equal(res.body.error, 'Method Not Allowed');
   assert.equal(res.headers['Allow'], 'GET');
 });
+
+test('GET /healthz с query string возвращает 200', async () => {
+  const res = await request('/healthz?probe=1', 'GET');
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.status, 'ok');
+  assert.equal(typeof res.body.uptime_sec, 'number');
+});
+
+test('GET /stats с query string возвращает 200', async () => {
+  const res = await request('/stats?filter=all', 'GET');
+  assert.equal(res.statusCode, 200);
+  assert.equal(typeof res.body.visits, 'number');
+  assert.equal(typeof res.body.successes, 'number');
+});
+
+test('POST /quote с query string обрабатывается корректно', async () => {
+  const beforeVisits = counters.getStats().visits;
+  const beforeSuccesses = counters.getStats().successes;
+  
+  const res = await request('/quote?test=true', 'POST', {
+    items: [{ sku: 'a', price: 1000, qty: 1 }],
+  });
+  
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.goods, 1000);
+  assert.equal(res.body.delivery, 300);
+  assert.equal(res.body.total, 1300);
+  
+  const afterVisits = counters.getStats().visits;
+  const afterSuccesses = counters.getStats().successes;
+  assert.equal(afterVisits, beforeVisits + 1);
+  assert.equal(afterSuccesses, beforeSuccesses + 1);
+});
