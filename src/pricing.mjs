@@ -86,6 +86,7 @@ function validatePromoCode(code, now = new Date()) {
 
 /**
  * Расчёт суммы скидки в рублях.
+ * Возвращает 0 для неизвестного промо-кода.
  * @param {number} goods
  * @param {string|null} promoCode
  */
@@ -93,7 +94,7 @@ export function discountAmount(goods, promoCode) {
   if (!promoCode) return 0;
   const discount = validatePromoCode(promoCode);
   if (discount === null) {
-    throw new Error('неизвестный промо-код');
+    return 0;
   }
   return goods * discount;
 }
@@ -121,6 +122,7 @@ function generateInvoiceId(items, promoCode, seq = 1) {
 
 /**
  * Итог заказа: позиции, доставка, скидка по промокоду, способ оплаты, сумма.
+ * Возвращает скидку 0 и promoStatus 'unknown' для неизвестного промо-кода.
  * @param {Item[]} items
  * @param {string|null} promoCode — опциональный промокод
  * @param {string|null} paymentMethod — опциональный способ оплаты
