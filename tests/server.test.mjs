@@ -48,7 +48,12 @@ async function request(url, method = 'GET', body = null, customHeaders = {}) {
 
   // Если есть тело, имитируем readable stream
   if (body) {
-    const bodyStr = JSON.stringify(body);
+    let bodyStr;
+    if (typeof body === 'string') {
+      bodyStr = body;
+    } else {
+      bodyStr = JSON.stringify(body);
+    }
     req[Symbol.asyncIterator] = async function*() {
       yield Buffer.from(bodyStr);
     };
@@ -252,6 +257,46 @@ test('POST /quote с query string обрабатывается корректн�
   assert.equal(res.body.goods, 1000);
   assert.equal(res.body.delivery, 300);
   assert.equal(res.body.total, 1300);
+  
+  const afterVisits = counters.getStats().visits;
+  const afterSuccesses = counters.getStats().successes;
+  assert.equal(afterVisits, beforeVisits + 1);
+  assert.equal(afterSuccesses, beforeSuccesses + 1);
+});
+
+test('POST /quote с телом больше 64 КБ возвращает 413', async () => {
+  const beforeVisits = counters.getStats().visits;
+  const beforeSuccesses = counters.getStats().successes;
+  
+  // Создаем тело больше 64 КБ (65 КБ)
+  const largeData = { items: [{ sku: 'a', price: 1000, qty: 1 }] };
+  largeData.largeString = 'x'.repeat(65 * 1024);
+  
+  const res = await request('/quote', 'POST', largeData);
+  
+  assert.equal(res.statusCode, 413);
+  assert.ok(res.body.error);
+  assert.ok(res.body.error.includes('exceeds limit'));
+  
+  const afterVisits = counters.getStats().visits;
+  const afterSuccesses = counters.getStats().successes;
+  assert.equal(afterVisits, beforeVisits + 1);
+  assert.equal(afterSuccesses, beforeSuccesses);
+});
+
+test('POST /quote с телом меньше 64 КБ обрабатывается корректно', async () => {
+  const beforeVisits = counters.getStats().visits;
+  const beforeSuccesses = counters.getStats().successes;
+  
+  // Создаем тело меньше 64 КБ (63 КБ)
+  const normalData = { items: [{ sku: 'a', price: 1000, qty: 1 }] };
+  normalData.normalString = 'x'.repeat(63 * 1024);
+  
+  const res = await request('/quote', 'POST', normalData);
+  
+  assert.equal(res.statusCode, 200);
+  assert.ok(res.body.goods);
+  assert.ok(res.body.total);
   
   const afterVisits = counters.getStats().visits;
   const afterSuccesses = counters.getStats().successes;

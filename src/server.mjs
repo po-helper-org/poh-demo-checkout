@@ -18,9 +18,20 @@ function send(res, code, body, extraHeaders = {}) {
   res.end(payload);
 }
 
-async function readJson(req) {
+async function readJson(req, maxSize = 64 * 1024) {
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
+  let totalSize = 0;
+  
+  for await (const chunk of req) {
+    totalSize += chunk.length;
+    if (totalSize > maxSize) {
+      const error = new Error(`Payload too large: ${totalSize} bytes exceeds limit of ${maxSize} bytes`);
+      error.code = 'ERR_HTTP_PAYLOAD_TOO_LARGE';
+      throw error;
+    }
+    chunks.push(chunk);
+  }
+  
   if (chunks.length === 0) return null;
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
@@ -55,7 +66,10 @@ export const app = async (req, res) => {
     let body;
     try {
       body = await readJson(req);
-    } catch {
+    } catch (err) {
+      if (err.code === 'ERR_HTTP_PAYLOAD_TOO_LARGE') {
+        return send(res, 413, { error: err.message });
+      }
       // Битый JSON — ошибка запроса, а не сервера: 500 здесь увёл бы разбор в
       // логи сервиса вместо ответа клиенту.
       return send(res, 400, { error: 'тело запроса не разобралось как JSON' });
