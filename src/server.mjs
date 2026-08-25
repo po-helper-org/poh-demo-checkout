@@ -45,6 +45,13 @@ export const app = async (req, res) => {
 
   if (pathname === '/quote' && req.method === 'POST') {
     counters.incVisit();
+    
+    // Проверка Content-Type до попытки парсинга JSON
+    const contentType = req.headers['content-type'];
+    if (!contentType || !contentType.startsWith('application/json')) {
+      return send(res, 415, { error: 'ожидается Content-Type: application/json' });
+    }
+    
     let body;
     try {
       body = await readJson(req);
