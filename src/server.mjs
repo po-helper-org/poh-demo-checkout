@@ -30,8 +30,19 @@ export const app = async (req, res) => {
     uptime_sec: Math.floor(process.uptime())
   });
 
-  if (req.url === '/stats' && req.method === 'GET') {
-    return send(res, 200, counters.getStats());
+  if (req.url === '/stats') {
+    if (req.method === 'GET') {
+      return send(res, 200, counters.getStats());
+    }
+    // POST (или любой другой метод) не разрешён для /stats
+    const payload = JSON.stringify({ error: 'метод не поддерживается' });
+    res.writeHead(405, {
+      'content-type': 'application/json; charset=utf-8',
+      'content-length': Buffer.byteLength(payload),
+      'allow': 'GET',
+    });
+    res.end(payload);
+    return;
   }
 
   if (req.url === '/quote' && req.method === 'POST') {

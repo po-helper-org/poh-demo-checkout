@@ -139,3 +139,24 @@ test('GET /stats после нескольких запросов возвращ
   assert.equal(res.body.visits, beforeVisits + 2);
   assert.equal(res.body.successes, beforeSuccesses + 2);
 });
+
+test('POST /stats возвращает 405 Method Not Allowed', async () => {
+  const res = await request('/stats', 'POST', {});
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.headers.allow, 'GET');
+  assert.equal(res.body.error, 'метод не поддерживается');
+});
+
+test('DELETE /stats возвращает 405 Method Not Allowed', async () => {
+  const res = await request('/stats', 'DELETE');
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.headers.allow, 'GET');
+  assert.equal(res.body.error, 'метод не поддерживается');
+});
+
+test('PUT /stats возвращает 405 Method Not Allowed', async () => {
+  const res = await request('/stats', 'PUT', {});
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.headers.allow, 'GET');
+  assert.equal(res.body.error, 'метод не поддерживается');
+});
