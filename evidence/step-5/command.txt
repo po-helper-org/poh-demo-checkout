@@ -1,0 +1,397 @@
+$ node --test "tests/*.test.mjs"
+код возврата: 0
+
+TAP version 13
+# Subtest: GET /healthz возвращает статус и время работы
+ok 1 - GET /healthz возвращает статус и время работы
+  ---
+  duration_ms: 77.403239
+  type: 'test'
+  ...
+# Subtest: начальное состояние — нули
+ok 2 - начальное состояние — нули
+  ---
+  duration_ms: 2.110054
+  type: 'test'
+  ...
+# Subtest: incVisit инкрементирует visits
+ok 3 - incVisit инкрементирует visits
+  ---
+  duration_ms: 0.386908
+  type: 'test'
+  ...
+# Subtest: incSuccess инкрементирует successes
+ok 4 - incSuccess инкрементирует successes
+  ---
+  duration_ms: 0.230484
+  type: 'test'
+  ...
+# Subtest: getStats возвращает объект с числами
+ok 5 - getStats возвращает объект с числами
+  ---
+  duration_ms: 0.244542
+  type: 'test'
+  ...
+# Subtest: несколько вызовов incVisit накапливаются
+ok 6 - несколько вызовов incVisit накапливаются
+  ---
+  duration_ms: 0.379888
+  type: 'test'
+  ...
+# Subtest: несколько вызовов incSuccess накапливаются
+ok 7 - несколько вызовов incSuccess накапливаются
+  ---
+  duration_ms: 0.246068
+  type: 'test'
+  ...
+# Subtest: visits и successes независимы
+ok 8 - visits и successes независимы
+  ---
+  duration_ms: 0.331044
+  type: 'test'
+  ...
+# Subtest: сумма позиций считается по количеству, а не по числу строк
+ok 9 - сумма позиций считается по количеству, а не по числу строк
+  ---
+  duration_ms: 1.833551
+  type: 'test'
+  ...
+# Subtest: заказ без позиций — ошибка, а не ноль
+ok 10 - заказ без позиций — ошибка, а не ноль
+  ---
+  duration_ms: 0.721004
+  type: 'test'
+  ...
+# Subtest: отрицательная цена не проходит
+ok 11 - отрицательная цена не проходит
+  ---
+  duration_ms: 8.778933
+  type: 'test'
+  ...
+# Subtest: дробное количество не проходит
+ok 12 - дробное количество не проходит
+  ---
+  duration_ms: 0.532628
+  type: 'test'
+  ...
+# Subtest: доставка платная ниже порога
+ok 13 - доставка платная ниже порога
+  ---
+  duration_ms: 3.299544
+  type: 'test'
+  ...
+# Subtest: на пороге доставка уже бесплатна
+ok 14 - на пороге доставка уже бесплатна
+  ---
+  duration_ms: 0.270091
+  type: 'test'
+  ...
+# Subtest: итог складывает товары и доставку
+ok 15 - итог складывает товары и доставку
+  ---
+  duration_ms: 1.590156
+  type: 'test'
+  ...
+# Subtest: заказ ниже минимальной суммы — ошибка с точной суммой нехватки
+ok 16 - заказ ниже минимальной суммы — ошибка с точной суммой нехватки
+  ---
+  duration_ms: 0.308712
+  type: 'test'
+  ...
+# Subtest: крупный заказ едет без платы за доставку
+ok 17 - крупный заказ едет без платы за доставку
+  ---
+  duration_ms: 0.585852
+  type: 'test'
+  ...
+# Subtest: промо-код WELCOME10 даёт 10% скидку
+ok 18 - промо-код WELCOME10 даёт 10% скидку
+  ---
+  duration_ms: 0.893335
+  type: 'test'
+  ...
+# Subtest: отрицательная сумма заказа не проходит
+ok 19 - отрицательная сумма заказа не проходит
+  ---
+  duration_ms: 0.370345
+  type: 'test'
+  ...
+# Subtest: NaN в качестве суммы заказа не проходит
+ok 20 - NaN в качестве суммы заказа не проходит
+  ---
+  duration_ms: 0.187478
+  type: 'test'
+  ...
+# Subtest: граница порога: 2999 руб — доставка платная
+ok 21 - граница порога: 2999 руб — доставка платная
+  ---
+  duration_ms: 0.122027
+  type: 'test'
+  ...
+# Subtest: граница порога: ровно 3000 руб — доставка бесплатна
+ok 22 - граница порога: ровно 3000 руб — доставка бесплатна
+  ---
+  duration_ms: 0.110107
+  type: 'test'
+  ...
+# Subtest: граница порога: 3001 руб — доставка бесплатна
+ok 23 - граница порога: 3001 руб — доставка бесплатна
+  ---
+  duration_ms: 0.165179
+  type: 'test'
+  ...
+# Subtest: промокод не передан — статус none, скидка 0
+ok 24 - промокод не передан — статус none, скидка 0
+  ---
+  duration_ms: 0.205376
+  type: 'test'
+  ...
+# Subtest: промо-код SUMMER20 даёт 20% скидку
+ok 25 - промо-код SUMMER20 даёт 20% скидку
+  ---
+  duration_ms: 0.269108
+  type: 'test'
+  ...
+# Subtest: промо-код FALL15 даёт 15% скидку с бесплатной доставкой
+ok 26 - промо-код FALL15 даёт 15% скидку с бесплатной доставкой
+  ---
+  duration_ms: 0.163902
+  type: 'test'
+  ...
+# Subtest: неизвестный промо-код — статус unknown, скидка 0
+ok 27 - неизвестный промо-код — статус unknown, скидка 0
+  ---
+  duration_ms: 0.281102
+  type: 'test'
+  ...
+# Subtest: порог доставки считается до скидки
+ok 28 - порог доставки считается до скидки
+  ---
+  duration_ms: 0.196429
+  type: 'test'
+  ...
+# Subtest: discountAmount без кода возвращает 0
+ok 29 - discountAmount без кода возвращает 0
+  ---
+  duration_ms: 0.154827
+  type: 'test'
+  ...
+# Subtest: discountAmount с неизвестным кодом возвращает 0
+ok 30 - discountAmount с неизвестным кодом возвращает 0
+  ---
+  duration_ms: 0.110196
+  type: 'test'
+  ...
+# Subtest: discountAmount с валидным кодом считает скидку
+ok 31 - discountAmount с валидным кодом считает скидку
+  ---
+  duration_ms: 0.115533
+  type: 'test'
+  ...
+# Subtest: единое поведение функций при неизвестном промо-коде
+ok 32 - единое поведение функций при неизвестном промо-коде
+  ---
+  duration_ms: 0.1497
+  type: 'test'
+  ...
+# Subtest: промокод SALE10 даёт 10% скидки
+ok 33 - промокод SALE10 даёт 10% скидки
+  ---
+  duration_ms: 0.226835
+  type: 'test'
+  ...
+# Subtest: доставка не скидывается при применении промокода
+ok 34 - доставка не скидывается при применении промокода
+  ---
+  duration_ms: 0.161567
+  type: 'test'
+  ...
+# Subtest: paymentMethod=cloudpayments добавляет блок payment
+ok 35 - paymentMethod=cloudpayments добавляет блок payment
+  ---
+  duration_ms: 1.244714
+  type: 'test'
+  ...
+# Subtest: paymentMethod с промокодом — payment.amount = total
+ok 36 - paymentMethod с промокодом — payment.amount = total
+  ---
+  duration_ms: 0.334591
+  type: 'test'
+  ...
+# Subtest: невалидный paymentMethod — ошибка 400
+ok 37 - невалидный paymentMethod — ошибка 400
+  ---
+  duration_ms: 0.298394
+  type: 'test'
+  ...
+# Subtest: ошибка неизвестного способа оплаты содержит список доступных
+ok 38 - ошибка неизвестного способа оплаты содержит список доступных
+  ---
+  duration_ms: 0.34451
+  type: 'test'
+  ...
+# Subtest: без paymentMethod — статус none, payment=null
+ok 39 - без paymentMethod — статус none, payment=null
+  ---
+  duration_ms: 0.128406
+  type: 'test'
+  ...
+# Subtest: invoiceSeq влияет на invoiceId
+ok 40 - invoiceSeq влияет на invoiceId
+  ---
+  duration_ms: 0.407545
+  type: 'test'
+  ...
+# Subtest: invoiceId детерминирован для одного состава
+ok 41 - invoiceId детерминирован для одного состава
+  ---
+  duration_ms: 0.19229
+  type: 'test'
+  ...
+# Subtest: paymentMethod с бесплатной доставкой
+ok 42 - paymentMethod с бесплатной доставкой
+  ---
+  duration_ms: 0.175809
+  type: 'test'
+  ...
+# Subtest: paymentMethod с невалидным промокодом
+ok 43 - paymentMethod с невалидным промокодом
+  ---
+  duration_ms: 0.276795
+  type: 'test'
+  ...
+# Subtest: GET /stats возвращает начальные нули
+ok 44 - GET /stats возвращает начальные нули
+  ---
+  duration_ms: 2.424425
+  type: 'test'
+  ...
+# Subtest: POST /quote инкрементирует visits
+ok 45 - POST /quote инкрементирует visits
+  ---
+  duration_ms: 1.283255
+  type: 'test'
+  ...
+# Subtest: POST /quote инкрементирует successes при успешном запросе
+ok 46 - POST /quote инкрементирует successes при успешном запросе
+  ---
+  duration_ms: 0.500367
+  type: 'test'
+  ...
+# Subtest: GET /healthz не инкрементирует visits
+ok 47 - GET /healthz не инкрементирует visits
+  ---
+  duration_ms: 0.334976
+  type: 'test'
+  ...
+# Subtest: POST /quote с невалидным JSON инкрементирует visits, но не successes
+ok 48 - POST /quote с невалидным JSON инкрементирует visits, но не successes
+  ---
+  duration_ms: 0.37161
+  type: 'test'
+  ...
+# Subtest: POST /quote с пустым заказом инкрементирует visits, но не successes
+ok 49 - POST /quote с пустым заказом инкрементирует visits, но не successes
+  ---
+  duration_ms: 0.455676
+  type: 'test'
+  ...
+# Subtest: GET /stats после нескольких запросов возвращает корректные значения
+ok 50 - GET /stats после нескольких запросов возвращает корректные значения
+  ---
+  duration_ms: 0.575027
+  type: 'test'
+  ...
+# Subtest: GET /healthz возвращает 200 с данными о состоянии
+ok 51 - GET /healthz возвращает 200 с данными о состоянии
+  ---
+  duration_ms: 0.367327
+  type: 'test'
+  ...
+# Subtest: POST /healthz возвращает 405 с заголовком Allow: GET
+ok 52 - POST /healthz возвращает 405 с заголовком Allow: GET
+  ---
+  duration_ms: 0.531028
+  type: 'test'
+  ...
+# Subtest: PUT /healthz возвращает 405 с заголовком Allow: GET
+ok 53 - PUT /healthz возвращает 405 с заголовком Allow: GET
+  ---
+  duration_ms: 0.578817
+  type: 'test'
+  ...
+# Subtest: DELETE /healthz возвращает 405 с заголовком Allow: GET
+ok 54 - DELETE /healthz возвращает 405 с заголовком Allow: GET
+  ---
+  duration_ms: 0.311102
+  type: 'test'
+  ...
+# Subtest: GET /healthz с query string возвращает 200
+ok 55 - GET /healthz с query string возвращает 200
+  ---
+  duration_ms: 0.284685
+  type: 'test'
+  ...
+# Subtest: GET /stats с query string возвращает 200
+ok 56 - GET /stats с query string возвращает 200
+  ---
+  duration_ms: 0.16782
+  type: 'test'
+  ...
+# Subtest: POST /quote с Content-Type application/json возвращает 200
+ok 57 - POST /quote с Content-Type application/json возвращает 200
+  ---
+  duration_ms: 0.326925
+  type: 'test'
+  ...
+# Subtest: POST /quote с Content-Type text/plain возвращает 415
+ok 58 - POST /quote с Content-Type text/plain возвращает 415
+  ---
+  duration_ms: 0.247658
+  type: 'test'
+  ...
+# Subtest: POST /quote без Content-Type возвращает 415
+ok 59 - POST /quote без Content-Type возвращает 415
+  ---
+  duration_ms: 0.194934
+  type: 'test'
+  ...
+# Subtest: POST /quote с Content-Type application/json; charset=utf-8 возвращает 200
+ok 60 - POST /quote с Content-Type application/json; charset=utf-8 возвращает 200
+  ---
+  duration_ms: 0.217104
+  type: 'test'
+  ...
+# Subtest: POST /quote с Content-Type application/x-www-form-urlencoded возвращает 415
+ok 61 - POST /quote с Content-Type application/x-www-form-urlencoded возвращает 415
+  ---
+  duration_ms: 0.150599
+  type: 'test'
+  ...
+# Subtest: POST /quote с query string обрабатывается корректно
+ok 62 - POST /quote с query string обрабатывается корректно
+  ---
+  duration_ms: 0.481507
+  type: 'test'
+  ...
+# Subtest: POST /quote с телом больше 64 КБ возвращает 413
+ok 63 - POST /quote с телом больше 64 КБ возвращает 413
+  ---
+  duration_ms: 0.666178
+  type: 'test'
+  ...
+# Subtest: POST /quote с телом меньше 64 КБ обрабатывается корректно
+ok 64 - POST /quote с телом меньше 64 КБ обрабатывается корректно
+  ---
+  duration_ms: 0.68641
+  type: 'test'
+  ...
+1..64
+# tests 64
+# suites 0
+# pass 64
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 308.714417

@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/quote",
+    "body": {
+      "items": [
+        {
+          "sku": "a",
+          "price": 1000,
+          "qty": 2
+        }
+      ]
+    }
+  },
+  "status": 200,
+  "body": "{\"goods\":2000,\"delivery\":300,\"discount\":0,\"promoStatus\":\"none\",\"total\":2300,\"payment\":null,\"paymentStatus\":\"none\"}",
+  "error": ""
+}

@@ -1,0 +1,10 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/healthz",
+    "body": null
+  },
+  "status": 200,
+  "body": "{\"status\":\"ok\",\"uptime_sec\":1}",
+  "error": ""
+}

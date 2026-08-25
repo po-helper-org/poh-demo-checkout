@@ -1,0 +1,12 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/quote",
+    "body": {
+      "items": []
+    }
+  },
+  "status": 400,
+  "body": "{\"error\":\"заказ без позиций\"}",
+  "error": ""
+}
