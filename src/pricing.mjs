@@ -2,6 +2,8 @@
 // проверяется тестом построчно, и подмешивать сюда сеть значило бы проверять
 // вместе с ней.
 
+import { createHash } from 'node:crypto';
+
 export const DELIVERY_FEE = 300;
 
 // Порог бесплатной доставки. Заказ ровно на пороге доставку уже не платит:
@@ -110,13 +112,8 @@ export function discountAmount(goods, promoCode) {
 function generateInvoiceId(items, promoCode, seq = 1) {
   // Хеш только от состава заказа — детерминированность
   const params = JSON.stringify({ items, promoCode });
-  let hash = 0;
-  for (let i = 0; i < params.length; i++) {
-    const char = params.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32bit integer
-  }
-  const hashHex = Math.abs(hash).toString(16).toUpperCase().padStart(8, '0');
+  const hash = createHash('sha256').update(params).digest('hex');
+  const hashHex = hash.substring(0, 8).toUpperCase();
   return `INV-${hashHex}-${seq}`;
 }
 
