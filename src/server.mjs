@@ -121,6 +121,12 @@ export const app = async (req, res) => {
     return send(res, 200, counters.getStats());
   }
 
+  // Не POST на /quote — 405 с Allow, как у /healthz и /stats: без guard-а
+  // запрос проваливается в раздачу статики и отвечает 404 про файл.
+  if (pathname === '/quote' && req.method !== 'POST') {
+    return send(res, 405, { error: 'Method Not Allowed' }, { 'Allow': 'POST' });
+  }
+
   if (pathname === '/quote' && req.method === 'POST') {
     counters.incVisit();
     
