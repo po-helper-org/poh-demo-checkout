@@ -324,3 +324,43 @@ test('POST /quote с телом меньше 64 КБ обрабатываетс�
   assert.equal(afterVisits, beforeVisits + 1);
   assert.equal(afterSuccesses, beforeSuccesses + 1);
 });
+
+// === Метод, отличный от POST, на /quote ===
+
+test('GET /quote возвращает 405 с заголовком Allow: POST', async () => {
+  const res = await request('/quote', 'GET');
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.body.error, 'Method Not Allowed');
+  assert.equal(res.headers['Allow'], 'POST');
+});
+
+test('PUT /quote возвращает 405 с заголовком Allow: POST', async () => {
+  const res = await request('/quote', 'PUT');
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.body.error, 'Method Not Allowed');
+  assert.equal(res.headers['Allow'], 'POST');
+});
+
+test('DELETE /quote возвращает 405 с заголовком Allow: POST', async () => {
+  const res = await request('/quote', 'DELETE');
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.body.error, 'Method Not Allowed');
+  assert.equal(res.headers['Allow'], 'POST');
+});
+
+test('GET /quote не инкрементирует visits', async () => {
+  const before = counters.getStats().visits;
+  await request('/quote', 'GET');
+  const after = counters.getStats().visits;
+  assert.equal(after, before);
+});
+
+test('POST /quote продолжает работать как раньше', async () => {
+  const res = await request('/quote', 'POST', {
+    items: [{ sku: 'a', price: 1000, qty: 1 }],
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.goods, 1000);
+  assert.equal(res.body.delivery, 300);
+  assert.equal(res.body.total, 1300);
+});
