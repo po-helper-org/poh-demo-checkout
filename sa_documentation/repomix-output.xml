@@ -1,0 +1,2902 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+.delivery/
+  checks.json
+.github/
+  workflows/
+    ci.yml
+    openhands-resolver.yml
+    pr-review.yml
+.harness/
+  context.md
+  plan.md
+.openhands/
+  task-rules.md
+src/
+  metrics.mjs
+  pricing.mjs
+  server.mjs
+static/
+  app.js
+  index.html
+  style.css
+tests/
+  healthz.test.mjs
+  metrics.test.mjs
+  pricing.test.mjs
+  server.test.mjs
+.gitignore
+AGENTS.md
+CLAUDE.md
+DEMO.md
+package.json
+README.md
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path=".delivery/checks.json">
+{
+  "_comment": "Чем Delivery-Agent подтверждает, что выкаченный сервис работает так, как описано. Проверки живут ЗДЕСЬ, а не в агенте: что считать правильным поведением, знает репозиторий, а агент это исполняет и не имеет права додумывать.",
+  "service": {
+    "port": 8080,
+    "start": "node src/server.mjs",
+    "health_path": "/healthz",
+    "image": "node:22-slim"
+  },
+  "checks": [
+    {
+      "name": "healthz",
+      "method": "GET",
+      "path": "/healthz",
+      "expect_status": 200,
+      "expect_json": {
+        "status": "ok"
+      },
+      "source": "src/server.mjs — /healthz отдаёт status и uptime_sec"
+    },
+    {
+      "name": "quote-base",
+      "method": "POST",
+      "path": "/quote",
+      "body": {
+        "items": [
+          {
+            "sku": "a",
+            "price": 1000,
+            "qty": 2
+          }
+        ]
+      },
+      "expect_status": 200,
+      "expect_json": {
+        "goods": 2000,
+        "delivery": 300,
+        "total": 2300
+      },
+      "source": "README, раздел «Сервис»: заказ на 2000 платит доставку 300"
+    },
+    {
+      "name": "quote-free-delivery-at-threshold",
+      "method": "POST",
+      "path": "/quote",
+      "body": {
+        "items": [
+          {
+            "sku": "a",
+            "price": 1500,
+            "qty": 2
+          }
+        ]
+      },
+      "expect_status": 200,
+      "expect_json": {
+        "goods": 3000,
+        "delivery": 0,
+        "total": 3000
+      },
+      "source": "pricing.mjs FREE_DELIVERY_FROM — «от 3000» включительно"
+    },
+    {
+      "name": "quote-rejects-empty-order",
+      "method": "POST",
+      "path": "/quote",
+      "body": {
+        "items": []
+      },
+      "expect_status": 400,
+      "source": "pricing.mjs subtotal — заказ без позиций это ошибка запроса, а не 500"
+    }
+  ]
+}
+</file>
+
+<file path=".github/workflows/ci.yml">
+# Проверка каждого PR и каждого коммита в main.
+#
+# Зависимостей у сервиса нет намеренно — это его свойство, а не упущение, и
+# `npm ci` здесь молча создал бы их появлению повод.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: тесты
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test "tests/*.test.mjs"
+</file>
+
+<file path=".github/workflows/openhands-resolver.yml">
+# Активность Develop контура: подготовленный Issue → ветка → код → PR.
+#
+# Issue-Agent доводит задачу до `ready-for-dev` и системных требований, после чего
+# диспатчит этот workflow (`shared/develop.py` в poh-issue-agents). Код пишет
+# OpenHands в headless-режиме — прямо на раннере, без Docker-песочницы: раннер
+# одноразовый и сам является песочницей, а поднимать внутри него ещё одну значит
+# платить минутами за изоляцию, которая уже есть.
+#
+# Почему `workflow_dispatch`, а не метка-триггер. Метка — состояние, а не событие:
+# повторная постановка уже висящей метки не шлёт ничего, и запуск теряется молча.
+# Второй вход по метке `fix-me` оставлен как ручной дублёр для человека — им
+# запускают прогон без Temporal, когда цикл почему-то не поднялся.
+#
+# Токен по умолчанию — штатный GITHUB_TOKEN раннера: PR-Agent здесь работает как
+# GitHub App по вебхуку, а вебхуки App приходят независимо от того, кто автор PR.
+# Секрет `PAT_TOKEN` перебивает его и нужен ровно в одном случае: если ревью
+# переведут обратно на GitHub Actions. PR, созданный GITHUB_TOKEN, НЕ порождает
+# событий workflow, и Actions-ревью на нём не запустилось бы.
+name: OpenHands Resolver
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue, который берём в разработку
+        required: true
+      research_branch:
+        description: Ветка с артефактами аналитики (пусто — аналитики не было)
+        required: false
+        default: ''
+      priority:
+        description: Приоритет задачи по формуле Issue-Agent
+        required: false
+        default: ''
+  issues:
+    types: [labeled]
+
+# Права выданы job'ам явно и минимально: ветка и коммит (contents), SubIssue по
+# найденным edge-кейсам (issues), сам PR (pull-requests).
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  # Рубильник человека — отдельным job, а не первым шагом разработки. Причина не
+  # косметическая: упавший шаг внутри `develop` сделал бы весь прогон `failure`,
+  # и финальный доклад (`if: always()`) сообщил бы циклу «разработка сорвалась».
+  # Но `agents:off` — это не сбой, а решение человека забрать задачу себе, и
+  # докладывать о нём как о провале значит врать циклу. Отдельный job даёт
+  # третий исход: `develop` не запускается вовсе и не докладывает ничего.
+  gate:
+    name: проверка рубильника
+    runs-on: ubuntu-latest
+    # Ручной вход отрабатывает только по своей метке. Без этого условия job
+    # запускался бы на КАЖДОЙ метке, которую вешает триаж Issue-Agent, — то есть
+    # несколько раз подряд на каждой новой задаче.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.label.name == 'fix-me'
+    outputs:
+      go: ${{ steps.check.outputs.go }}
+    steps:
+      - id: check
+        # Правило R4 протокола агентов: проверка раньше первого обращения к LLM.
+        # Смысл в том, чтобы не тратить бюджет на то, что человек уже забрал себе.
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
+          ISSUE_NUMBER: ${{ github.event.inputs.issue_number || github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          labels=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+                     --json labels --jq '.labels[].name')
+          if grep -qix 'agents:off' <<<"$labels"; then
+            echo "::notice::agents:off на #$ISSUE_NUMBER — прогон не начинается"
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  develop:
+    name: разработка по Issue
+    runs-on: ubuntu-latest
+    needs: gate
+    if: needs.gate.outputs.go == 'true'
+    timeout-minutes: 45
+    # Ограничение на УРОВНЕ JOB, а не workflow. На уровне workflow оно убивало
+    # собственный прогон: каждая метка, которую вешает Issue-Agent, порождает
+    # событие `issues.labeled`, такой прогон попадает в ту же группу и, хотя все
+    # его job'ы пропускаются, всё равно вытесняет идущую разработку. Job в группу
+    # не входит, пока не запустился, поэтому пропущенные прогоны безвредны.
+    #
+    # Сама группа нужна: две ветки от одного Issue дают два PR с одним
+    # `Closes #N`, и корреляция события с задачей становится неоднозначной —
+    # ровно тот случай, который Issue-Agent отказывается разрешать догадкой.
+    concurrency:
+      group: openhands-${{ github.event.inputs.issue_number || github.event.issue.number }}
+      cancel-in-progress: true
+    outputs:
+      pr_number: ${{ steps.pr.outputs.number }}
+
+    env:
+      ISSUE_NUMBER: ${{ github.event.inputs.issue_number || github.event.issue.number }}
+      RESEARCH_BRANCH: ${{ github.event.inputs.research_branch }}
+      PRIORITY: ${{ github.event.inputs.priority }}
+      # Токен виден и агенту: SubIssue по найденным edge-кейсам он заводит сам,
+      # своим `gh issue create` изнутри прогона.
+      GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
+      GITHUB_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Полная история: ветку работы заводим от main, а diff считаем от него же.
+          fetch-depth: 0
+          token: ${{ secrets.PAT_TOKEN || github.token }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Версия точная, не плавающая: у setup-uv нет тегов-мажоров выше v8 —
+      # `@v10` не резолвится вовсе, и прогон падает на подготовке job'а.
+      - uses: astral-sh/setup-uv@v10.0.1
+
+      - name: Установить OpenHands
+        run: uv tool install openhands --python 3.12
+
+      - name: Собрать постановку для агента
+        # Постановка собирается ЗДЕСЬ, а не в промпте агента: то, что уехало в
+        # работу, должно быть видно в логе прогона дословно. Иначе на разборе
+        # «почему агент сделал не то» нечего предъявить.
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/oh"
+          task="$RUNNER_TEMP/oh/task.md"
+
+          {
+            echo "# Задача: реализовать Issue #$ISSUE_NUMBER"
+            echo
+            gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --json title,body --template '## {{.title}}{{"\n\n"}}{{.body}}'
+            echo
+          } > "$task"
+
+          if [ -n "$RESEARCH_BRANCH" ] && git ls-remote --exit-code --heads origin "$RESEARCH_BRANCH" >/dev/null 2>&1; then
+            echo "## Системные требования (аналитика Issue-Agent)" >> "$task"
+            echo >> "$task"
+            git fetch --depth 1 origin "$RESEARCH_BRANCH"
+            # Каталог фиксирован сервисом аналитики (`FNR_DIR` в poh-issue-agents),
+            # ветка своя на каждый Issue. Порядок задан явно — требования первыми:
+            # то, что агент прочитает раньше, весит больше, а `task.md` и
+            # `concept.md` это путь к требованиям, а не сами требования.
+            # Отсутствующий файл — не сбой: набор артефактов у прогонов разный.
+            for f in system_requirements.md task.md concept.md; do
+              path="sa_documentation/FNR/FNR_1/$f"
+              if git cat-file -e "FETCH_HEAD:$path" 2>/dev/null; then
+                echo "### $f" >> "$task"
+                git show "FETCH_HEAD:$path" >> "$task"
+                echo >> "$task"
+              fi
+            done
+          else
+            echo "## Аналитики по задаче нет — работай от тела Issue." >> "$task"
+            echo >> "$task"
+          fi
+
+          # Правила работы лежат файлом в репозитории, а не строкой внутри
+          # workflow: их правит тот, кто правит конвенции проекта, и держать их
+          # в YAML значило бы прятать контракт от того, кому он адресован.
+          cat .openhands/task-rules.md >> "$task"
+
+          echo "::group::постановка, ушедшая агенту"
+          cat "$task"
+          echo "::endgroup::"
+
+      - name: Ветка работы
+        run: |
+          set -euo pipefail
+          git config user.name  "openhands-agent"
+          git config user.email "openhands-agent@users.noreply.github.com"
+          echo "WORK_BRANCH=feature/${ISSUE_NUMBER}-openhands" >> "$GITHUB_ENV"
+          git checkout -b "feature/${ISSUE_NUMBER}-openhands"
+
+      - name: Прогон OpenHands
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_MODEL: ${{ vars.LLM_MODEL || 'openai/glm-4.6' }}
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL || 'https://api.z.ai/api/coding/paas/v4' }}
+          OPENHANDS_SUPPRESS_BANNER: '1'
+        run: |
+          set -euo pipefail
+          openhands --headless --override-with-envs -f "$RUNNER_TEMP/oh/task.md"
+
+      - name: Проверки
+        # Тот же прогон, что и в CI. Гоняется ЗДЕСЬ, а не только на PR: PR,
+        # созданный GITHUB_TOKEN, не порождает событий workflow, поэтому CI на
+        # нём не запускается вовсе. Без этого шага красный код уезжал бы в PR
+        # без единого признака того, что он красный.
+        #
+        # Падение здесь останавливает прогон до пуша: ветки и PR не будет, а
+        # цикл получит доклад о провале и вернёт задачу человеку.
+        run: node --test "tests/*.test.mjs"
+
+      - name: Коммит и пуш
+        id: push
+        run: |
+          set -euo pipefail
+          git add -A
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::агент не изменил ни одного файла"
+            exit 0
+          fi
+          git commit \
+            -m "feat(#${ISSUE_NUMBER}): реализация по системным требованиям" \
+            -m "Автор изменений — OpenHands, запущен активностью Develop по Issue #${ISSUE_NUMBER}."
+          git push -u origin "$WORK_BRANCH"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Открыть PR
+        id: pr
+        if: steps.push.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          # `Closes #N` — сквозной ключ цепочки: по нему Issue-Agent связывает PR
+          # с задачей, а GitHub закрывает её при слиянии.
+          body="$RUNNER_TEMP/oh/pr-body.md"
+          {
+            printf 'Closes #%s\n\n' "$ISSUE_NUMBER"
+            printf 'Разработку вёл OpenHands по системным требованиям из `%s`.\n' "${RESEARCH_BRANCH:-—}"
+            printf 'Найденные по дороге edge-кейсы вынесены отдельными SubIssue и в этой ветке не чинились.\n\n'
+            printf '<sub>origin: agent · root-issue: #%s</sub>\n' "$ISSUE_NUMBER"
+          } > "$body"
+
+          title=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json title --jq .title)
+          url=$(gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
+            --base main \
+            --head "$WORK_BRANCH" \
+            --title "feat(#${ISSUE_NUMBER}): ${title}" \
+            --body-file "$body")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "number=$(gh pr view "$url" --json number --jq .number)" >> "$GITHUB_OUTPUT"
+
+      - name: Доложить в цикл Issue
+        # Событие уходит ВСЕГДА (`if: always()`): цикл ждёт в фазе
+        # `in-development`, и молчание провалившегося прогона оставило бы Issue
+        # там навсегда. Нечем доложить — тоже факт, и он должен дойти.
+        if: always()
+        env:
+          ISSUE_AGENT_URL: ${{ secrets.ISSUE_AGENT_URL }}
+          AGENT_EVENT_SECRET: ${{ secrets.AGENT_EVENT_SECRET }}
+          PR_URL: ${{ steps.pr.outputs.url }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ISSUE_AGENT_URL:-}" ] || [ -z "${AGENT_EVENT_SECRET:-}" ]; then
+            echo "::warning::ISSUE_AGENT_URL/AGENT_EVENT_SECRET не заданы — событие не отправлено"
+            exit 0
+          fi
+
+          if [ "$JOB_STATUS" = "success" ] && [ -n "${PR_NUMBER:-}" ]; then
+            status=started; phase=pr-open
+            detail="OpenHands открыл PR ${PR_URL} — Closes #${ISSUE_NUMBER}"
+            ref="$PR_NUMBER"
+          else
+            status=failed; phase=in-development
+            detail="Прогон OpenHands завершился как ${JOB_STATUS}, PR не открыт: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            ref="run-${GITHUB_RUN_ID}"
+          fi
+
+          payload=$(jq -nc \
+            --arg repo "$GITHUB_REPOSITORY" --arg phase "$phase" --arg status "$status" \
+            --arg ref "$ref" --arg detail "$detail" --argjson root "$ISSUE_NUMBER" \
+            '{repo:$repo, agent:"openhands", phase:$phase, status:$status,
+              ref:$ref, root_issue:$root, detail:$detail}')
+
+          sig="sha256=$(printf '%s' "$payload" \
+            | openssl dgst -sha256 -hmac "$AGENT_EVENT_SECRET" -r | cut -d' ' -f1)"
+
+          curl -sS --fail-with-body -X POST "${ISSUE_AGENT_URL%/}/agent-event" \
+            -H 'Content-Type: application/json' \
+            -H "X-Agent-Signature-256: $sig" \
+            -d "$payload"
+
+  # Ревью вызовом, а не отдельным триггером: PR, созданный GITHUB_TOKEN, не
+  # порождает событий workflow, и ревью по `pull_request` на нём не запустилось
+  # бы никогда. Вызванный workflow идёт частью этого же прогона.
+  review:
+    name: ревью открытого PR
+    needs: develop
+    if: needs.develop.outputs.pr_number != ''
+    uses: ./.github/workflows/pr-review.yml
+    with:
+      pr_number: ${{ needs.develop.outputs.pr_number }}
+      root_issue: ${{ github.event.inputs.issue_number || github.event.issue.number }}
+    secrets: inherit
+</file>
+
+<file path=".github/workflows/pr-review.yml">
+# Ревью PR (PR-Agent на GLM) + доклад в цикл Issue.
+#
+# Два входа, один код ревью:
+#
+#   workflow_call   — вызов из прогона разработки сразу после открытия PR.
+#                     Именно вызов, а не отдельный триггер: PR, созданный
+#                     GITHUB_TOKEN, НЕ порождает событий workflow (правило
+#                     GitHub против рекурсии), и ревью по событию `pull_request`
+#                     на таком PR не запустилось бы никогда. Вызванный workflow
+#                     идёт частью того же прогона и этого ограничения не знает.
+#
+#   issue_comment   — повторная проверка после правок: человек (или Claude Code)
+#                     пишет `/review` в PR. Комментарий от живого пользователя
+#                     события порождает, здесь ограничения нет.
+#
+# Ревью гоняется CLI-образом pr-agent, а не GitHub Action'ом: action читает
+# событие прогона и на `workflow_call` не нашёл бы PR, о котором речь. CLI
+# принимает адрес PR явным аргументом и одинаково работает с обоих входов.
+name: PR Review
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        required: true
+        type: string
+      root_issue:
+        required: false
+        type: string
+        default: ''
+  issue_comment:
+    types: [created]
+
+  #   pull_request    — PR открыл агент разработки, который живёт НЕ в Actions.
+  #                     В режиме `local` контур пишет код и открывает PR внутри
+  #                     стенда, своим GitHub App: `openhands-resolver.yml` не
+  #                     запускается вовсе, а значит `workflow_call` некому
+  #                     сделать. Ревью не начиналось никогда, цикл оставался в
+  #                     фазе `pr-open` до истечения срока — и выглядело это как
+  #                     зависший PR-Agent. Токен App не GITHUB_TOKEN, поэтому
+  #                     правило GitHub против рекурсии здесь не действует и
+  #                     событие приходит.
+  pull_request:
+    types: [opened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+    name: ревью PR
+    runs-on: ubuntu-latest
+    # Вход различается по `inputs`, а НЕ по `github.event_name`: вызванный
+    # workflow наследует контекст вызывающего, и `event_name` там показывает
+    # исходное событие (`workflow_dispatch`), а не `workflow_call`. Условие на
+    # `event_name` молча пропускало ревью после каждой разработки.
+    #
+    # Для комментария: только в PR и только команда `/review`. Фильтр по
+    # `user.type != 'Bot'` снят: перепроверку после круга правок запрашивает сам
+    # цикл, и пишет он токеном GitHub App — то есть ботом. С фильтром круг
+    # правок вносил изменения и ждал ревью, которое не запускалось. Петли это не
+    # создаёт: ни один ответ агентов не начинается с `/review`, а число кругов
+    # ограничено PR_FIX_MAX_ROUNDS.
+    if: >-
+      inputs.pr_number != '' ||
+      github.event_name == 'pull_request' ||
+      (github.event.issue.pull_request != null &&
+       startsWith(github.event.comment.body, '/review'))
+    timeout-minutes: 20
+
+    env:
+      PR_NUMBER: ${{ inputs.pr_number || github.event.pull_request.number || github.event.issue.number }}
+      GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
+
+    steps:
+      - name: Рубильник человека
+        # Правило R4: проверка раньше первого обращения к LLM. `agents:off` на
+        # PR либо на связанном Issue останавливает ревью до траты бюджета.
+        id: gate
+        run: |
+          set -euo pipefail
+          labels=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+                     --json labels --jq '.labels[].name')
+          if grep -qix 'agents:off' <<<"$labels"; then
+            echo "::notice::agents:off на PR #$PR_NUMBER — ревью не запускается"
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Ревью
+        id: review
+        if: steps.gate.outputs.go == 'true'
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_MODEL: ${{ vars.PR_AGENT_MODEL || 'openai/glm-4.6' }}
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL || 'https://api.z.ai/api/coding/paas/v4' }}
+        run: |
+          set -uo pipefail
+          url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/pull/${PR_NUMBER}"
+
+          # pr-agent ВЫХОДИТ НУЛЁМ, даже когда ревью не состоялось: на
+          # rate-limit модели он пишет `Failed to review PR` в лог, оставляет в
+          # PR заглушку «Preparing review...» и завершается успешно. Шаг Actions
+          # отчитывался успехом, цикл получал `status=started`, и круг правок
+          # уходил доводить PR по пустому тексту. Поэтому исход определяется по
+          # выводу, а не по коду возврата.
+          review() {
+            # persistent_comment (дефолт) переписывает ОДИН верхний комментарий
+            # «PR Reviewer Guide» вместо того, чтобы плодить новый на каждый круг.
+            # Именно поэтому «замечаний нет» видно как исчезнувший пункт, а не как
+            # отдельное сообщение.
+            docker run --rm \
+              -e "OPENAI.KEY=${LLM_API_KEY}" \
+              -e "OPENAI.API_BASE=${LLM_BASE_URL}" \
+              -e "CONFIG.MODEL=${LLM_MODEL}" \
+              -e "CONFIG.FALLBACK_MODELS=[]" \
+              -e "CONFIG.CUSTOM_MODEL_MAX_TOKENS=128000" \
+              -e "CONFIG.GIT_PROVIDER=github" \
+              -e "CONFIG.PUBLISH_OUTPUT=true" \
+              -e "GITHUB.USER_TOKEN=${GH_TOKEN}" \
+              -e "GITHUB.DEPLOYMENT_TYPE=user" \
+              codiumai/pr-agent:latest --pr_url "$url" review 2>&1 | tee /tmp/review.log
+            ! grep -q "Failed to review PR" /tmp/review.log
+          }
+
+          # Один повтор с паузой: rate-limit — состояние на минуту, а не отказ.
+          # Больше одного не нужно: если ключ выбран надолго, PR подождёт
+          # человека, а не будет жечь минуты раннера.
+          review && exit 0
+          echo "::warning::ревью не удалось с первого раза — повтор через 90 с"
+          sleep 90
+          review
+
+      - name: Доложить в цикл Issue
+        # Уходит всегда: цикл ждёт в фазе `pr-open`, и молчание провалившегося
+        # ревью оставило бы задачу там навсегда. Нечем доложить — тоже факт.
+        if: always() && steps.gate.outputs.go == 'true'
+        env:
+          ISSUE_AGENT_URL: ${{ secrets.ISSUE_AGENT_URL }}
+          AGENT_EVENT_SECRET: ${{ secrets.AGENT_EVENT_SECRET }}
+          ROOT_ISSUE: ${{ inputs.root_issue }}
+          REVIEW_OUTCOME: ${{ steps.review.outcome }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ISSUE_AGENT_URL:-}" ] || [ -z "${AGENT_EVENT_SECRET:-}" ]; then
+            echo "::warning::ISSUE_AGENT_URL/AGENT_EVENT_SECRET не заданы — событие не отправлено"
+            exit 0
+          fi
+
+          # Ключ задачи: из входа вызова, иначе из тела PR. Несколько `Closes #N`
+          # оставляют ключ пустым намеренно — выбрать первый попавшийся значит
+          # привязать работу не к той задаче.
+          root="$ROOT_ISSUE"
+          if [ -z "$root" ]; then
+            body=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+            mapfile -t found < <(grep -oiE '\b(close[sd]?|fix(e[sd])?|resolve[sd]?)[: ]+#[0-9]+' <<<"$body" \
+                                 | grep -oE '[0-9]+' | sort -u)
+            [ "${#found[@]}" -eq 1 ] && root="${found[0]}"
+          fi
+
+          if [ "$REVIEW_OUTCOME" = "success" ]; then
+            status=started
+            detail="PR-Agent опубликовал ревью на PR #${PR_NUMBER}"
+          else
+            status=failed
+            detail="Ревью не выполнено: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          fi
+
+          # Ревизия, по которой шло ревью, входит в ключ идемпотентности цикла.
+          # Без неё каждый круг правок докладывал одну и ту же тройку
+          # `(ref, phase, status)`, второй доклад отбрасывался как повторная
+          # доставка — и круг правок физически не мог пройти дважды.
+          revision=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+                       --json headRefOid --jq .headRefOid)
+
+          payload=$(jq -nc --arg repo "$GITHUB_REPOSITORY" --arg status "$status" \
+            --arg ref "$PR_NUMBER" --arg detail "$detail" --arg root "$root" \
+            --arg revision "$revision" \
+            '{repo:$repo, agent:"pr-agent", phase:"pr-review", status:$status,
+              ref:$ref, detail:$detail, revision:$revision}
+             + (if $root == "" then {} else {root_issue: ($root|tonumber)} end)')
+
+          sig="sha256=$(printf '%s' "$payload" \
+            | openssl dgst -sha256 -hmac "$AGENT_EVENT_SECRET" -r | cut -d' ' -f1)"
+
+          curl -sS --fail-with-body -X POST "${ISSUE_AGENT_URL%/}/agent-event" \
+            -H 'Content-Type: application/json' \
+            -H "X-Agent-Signature-256: $sig" \
+            -d "$payload"
+</file>
+
+<file path=".harness/context.md">
+# Контекст задачи
+
+Читать в этом порядке. Все файлы лежат рядом с этим.
+</file>
+
+<file path=".harness/plan.md">
+# Issue #163: 405 с `Allow: POST` на не-POST `/quote` — Implementation Plan
+
+> **For agentic workers:** план исполняется неинтерактивно, задача за задачей,
+> по порядку. Шаги помечены чекбоксами (`- [ ]`). Спрашивать некого: если шаг
+> нельзя выполнить буквально — принять минимальное решение в духе репозитория и
+> записать его в `.reflect.md`, не расширяя дифф.
+
+**Goal:** `GET /quote` (и любой метод, кроме `POST`) отвечает `405 Method Not
+Allowed` с заголовком `Allow: POST` и телом `{"error":"Method Not Allowed"}` —
+вместо нынешнего `404 {"error":"не найдено"}`. `POST /quote` работает как
+раньше.
+
+**Architecture:** один guard в HTTP-обёртке `src/server.mjs`, по образцу уже
+существующих проверок `/healthz` (строки 107–115) и `/stats` (117–122): путь
+совпал, метод не тот → `405` + `Allow`. Guard ставится **до** POST-ветки и
+**до** раздачи статики, чтобы запрос перестал проваливаться в `serveStatic` и
+падать в общий `404` (строка 168). Расчёт (`src/pricing.mjs`) и метрики не
+трогаются.
+
+**Tech Stack:** Node.js >= 22, только stdlib — `node:http`, `node:test`,
+`node:assert/strict`. Зависимостей у сервиса нет и не появляется.
+
+## Как собран этот план
+
+`.harness/` на этом прогоне содержит только `context.md` — ни `requirements.md`,
+ни `howtodemo.md` не собрались. Граница MVP взята из тела Issue (`.task.md`):
+curl-сценарий «было/должно работать» + «`POST /quote` продолжает работать как
+раньше» + правило репозитория «новая логика — новый тест».
+
+## Global Constraints
+
+- Тесты гонять той же командой, что и CI (`.github/workflows/ci.yml`):
+  `node --test "tests/*.test.mjs"`. Красный прогон в PR не отдаём.
+- Новая логика — новый тест; правка без теста в этом репозитории считается
+  незавершённой.
+- Зависимостей нет: задачу закрываем из stdlib, новых пакетов не заводим.
+- `src/server.mjs` остаётся тонкой обёрткой — только разбор запроса и коды
+  ответов. `src/pricing.mjs` не меняется вообще.
+- Ответ на не-POST `/quote` дословно: статус `405`, заголовок `Allow: POST`,
+  тело `{"error":"Method Not Allowed"}` — тот же формат, что у `/healthz` и
+  `/stats`.
+- `405` по `/quote` **не** инкрементирует `visits`/`successes` — как и `405`
+  у `/healthz` и `/stats`.
+- Границы Issue: меняется поведение только `/quote` и только для методов,
+  отличных от `POST`. Раздача статики, расчёт и остальные эндпоинты — без
+  изменений; условие POST-ветки (`pathname === '/quote' && req.method ===
+  'POST'`) не «упрощать» — минимальный дифф.
+- Коммит, пуш и PR делает workflow после агента. В плане нет `git commit` /
+  `git push`; рабочее дерево остаётся с правками.
+- Ветка по конвенции репозитория: `fix/163-quote-405-allow-post`.
+- Edge-кейсы, найденные по дороге, в эту ветку не брать — записывать в
+  `.followups.md` в корне рабочего каталога (раздел `## <кратко>` на находку).
+
+---
+
+### Task 0: Спросить индекс repowise до первой правки
+
+**Files:**
+- Create: ничего (диалог с индексом публикуется артефактом автоматически)
+
+**Interfaces:**
+- Consumes: пусто — задача независима, это обязательный прегрев перед правками.
+- Produces: ответы индекса по компонентам `/quote` и раздаче статики; ними
+  пользуется Task 1 при формулировке тестов и Task 2 при выборе места guard-а.
+
+- [ ] **Step 1: Задать индексу вопрос о компонентах, которые собираемся менять**
+
+До чтения файлов по существу и до первой правки — не меньше одного вопроса к
+MCP-серверу `repowise` (`search_codebase`, `get_context`, `get_symbol` или
+`get_answer`) про `app` в `src/server.mjs`: кто ещё вызывает этот обработчик,
+как устроена раздача статики и почему `/quote` объявлен только под `POST`.
+Если индекс недоступен (вызов вернул ошибку) — работать без него, это штатный
+режим; пропускать шаг «потому что задача простая» нельзя.
+
+---
+
+### Task 1: Красные тесты на 405 для не-POST `/quote`
+
+**Files:**
+- Modify: `tests/server.test.mjs` (дописать в конец файла, после тестов
+  «Тесты валидации Content-Type», с шапкой-разделителем в стиле существующих)
+- Test: `tests/server.test.mjs`
+
+**Interfaces:**
+- Consumes: пусто — тесты от предыдущих задач не зависят. Используют уже
+  существующие в этом файле импорты и хелпер: `request(url, method, body,
+  customHeaders)` (строки 15–81) и синглтон `counters` из `src/metrics.mjs`.
+- Produces: пять тестов, фиксирующих контракт не-POST `/quote` — статус `405`,
+  заголовок `Allow: POST`, тело `{"error":"Method Not Allowed"}`, `visits` не
+  растёт, `POST /quote` остаётся `200`. Task 2 принимает их как спецификацию.
+
+- [ ] **Step 1: Дописать тесты в конец `tests/server.test.mjs`**
+
+```js
+
+// === Метод, отличный от POST, на /quote ===
+
+test('GET /quote возвращает 405 с заголовком Allow: POST', async () => {
+  const res = await request('/quote', 'GET');
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.body.error, 'Method Not Allowed');
+  assert.equal(res.headers['Allow'], 'POST');
+});
+
+test('PUT /quote возвращает 405 с заголовком Allow: POST', async () => {
+  const res = await request('/quote', 'PUT');
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.body.error, 'Method Not Allowed');
+  assert.equal(res.headers['Allow'], 'POST');
+});
+
+test('DELETE /quote возвращает 405 с заголовком Allow: POST', async () => {
+  const res = await request('/quote', 'DELETE');
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.body.error, 'Method Not Allowed');
+  assert.equal(res.headers['Allow'], 'POST');
+});
+
+test('GET /quote не инкрементирует visits', async () => {
+  const before = counters.getStats().visits;
+  await request('/quote', 'GET');
+  const after = counters.getStats().visits;
+  assert.equal(after, before);
+});
+
+test('POST /quote продолжает работать как раньше', async () => {
+  const res = await request('/quote', 'POST', {
+    items: [{ sku: 'a', price: 1000, qty: 1 }],
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.goods, 1000);
+  assert.equal(res.body.delivery, 300);
+  assert.equal(res.body.total, 1300);
+});
+```
+
+Трио `GET`/`PUT`/`DELETE` повторяет форму уже существующих тестов на `405`
+для `/healthz` и `/stats` (там оно зеркальное — `POST`/`PUT`/`DELETE` против
+GET-only эндпоинта). Тесты на `visits` и на `POST` — регрессионные: они
+проходят и до правки, они фиксируют то, что Issue требует не сломать.
+
+- [ ] **Step 2: Прогнать файл и убедиться, что новые тесты красные**
+
+Run: `node --test tests/server.test.mjs`
+Expected: FAIL — ровно три новых теста падают (`GET`/`PUT`/`DELETE /quote`) на
+первом ассерте с сообщением вида
+`Expected values to be strictly equal: 404 !== 405`. Два регрессионных теста
+(`visits`, `POST /quote`) зелёные и до правки. Остальные тесты файла зелёные.
+
+- [ ] **Step 3: Зафиксировать красный прогон как точку отсчёта**
+
+Ничего не править в `src/`. Если упало что-то, кроме трёх названных тестов, —
+остановиться и разобраться, а не идти дальше: значит, тест написан не так, как
+думалось.
+
+---
+
+### Task 2: Guard `405` в `src/server.mjs`
+
+**Files:**
+- Modify: `src/server.mjs:124` — вставить guard между блоком `/stats`
+  (заканчивается строкой 122) и POST-веткой `/quote` (строка 124)
+- Test: `tests/server.test.mjs`
+
+**Interfaces:**
+- Consumes: контракт из Task 1 (`405` + `Allow: POST` +
+  `{"error":"Method Not Allowed"}`, метрики не трогаем). Внутри файла
+  использует уже существующие `pathname` (строка 105) и `send(res, code, body,
+  extraHeaders)` (строки 29–37) — новых функций не заводить.
+- Produces: поведение `/quote` — любой метод, кроме `POST`, получает `405` до
+  того, как дойдёт до раздачи статики; POST-ветка (строки 124–158) и
+  раздача статики (строки 160–166) не изменены. Task 3 принимает это как
+  готовое поведение для HowToDemo.
+
+- [ ] **Step 1: Вставить guard перед POST-веткой `/quote`**
+
+Между строкой 123 (пустая) и строкой 124:
+
+```js
+  // Не POST на /quote — 405 с Allow, как у /healthz и /stats: без guard-а
+  // запрос проваливается в раздачу статики и отвечает 404 про файл.
+  if (pathname === '/quote' && req.method !== 'POST') {
+    return send(res, 405, { error: 'Method Not Allowed' }, { 'Allow': 'POST' });
+  }
+```
+
+Guard стоит **до** POST-ветки и **до** `if (req.method === 'GET')` со статикой,
+поэтому: не-POST до статики не доходит, а POST-ветка не меняет ни строки.
+Счётчики `counters.incVisit()` / `incSuccess()` остаются внутри POST-ветки,
+так что `405` метрики не двигает.
+
+- [ ] **Step 2: Прогнать весь набор тестов**
+
+Run: `node --test "tests/*.test.mjs"`
+Expected: PASS — все тесты всех четырёх файлов, включая пять новых и все
+старые (`/healthz`, `/stats`, Content-Type, 413, метрики, расчёт в
+`pricing.test.mjs`).
+
+- [ ] **Step 3: Прогнать HowToDemo из Issue на живом сервере**
+
+```bash
+PORT=8080 node src/server.mjs &
+sleep 1
+
+# 1. Главное из Issue: не-POST на /quote — 405 с Allow: POST
+curl -i http://localhost:8080/quote
+#   HTTP/1.1 405 Method Not Allowed
+#   Allow: POST
+#   {"error":"Method Not Allowed"}
+
+# 2. POST /quote продолжает работать: расчёт не меняется
+curl -i -X POST http://localhost:8080/quote \
+  -H 'content-type: application/json' \
+  -d '{"items":[{"sku":"a","price":1000,"qty":2}]}'
+#   HTTP/1.1 200 … {"goods":2000,"delivery":300,"total":2300,...}
+
+# 3. Статика не тронута
+curl -i http://localhost:8080/
+#   HTTP/1.1 200 … text/html
+
+# 4. Соседние эндпоинты не тронуты
+curl -i http://localhost:8080/healthz          # 200 {"status":"ok",...}
+curl -i -X POST http://localhost:8080/healthz  # 405, Allow: GET
+curl -i http://localhost:8080/stats            # 200
+
+kill %1
+```
+
+Expected: все пять проверок совпадают с комментариями. Любое расхождение —
+назад к Step 1, без расширения диффа.
+
+- [ ] **Step 4: Проверить, что дифф ровно такой, как задумано**
+
+Run: `git diff --stat`
+Expected: два файла — `src/server.mjs` (+6 строк: guard и две строки коммента)
+и `tests/server.test.mjs` (только добавленные тесты, без удалений). Что-либо
+ещё — убрать, это не относится к Issue #163.
+
+---
+
+### Task 3: Завершение прогона — след решения и находки
+
+**Files:**
+- Create: `.reflect.md` (корень рабочего каталога; в коммит не попадает —
+  его снимает контур)
+- Create: `.followups.md` (корень рабочего каталога; только если есть
+  настоящая находка — выдумывать не надо)
+
+**Interfaces:**
+- Consumes: результат Task 1 и Task 2 — рабочее дерево с правками в
+  `src/server.mjs` и `tests/server.test.mjs` и зелёным прогоном.
+- Produces: зафиксированный HowToDemo, `.reflect.md` с тремя разделами и
+  (при находках) `.followups.md`. В git ничего не коммитится и не пушится.
+
+- [ ] **Step 1: Финальный прогон тестов**
+
+Run: `node --test "tests/*.test.mjs"`
+Expected: PASS целиком. Без зелёного прогона работу не завершать.
+
+- [ ] **Step 2: Записать находки в `.followups.md` (если есть)**
+
+По одному разделу `## <кратко>` на находку, с файлом/строкой и тем, когда
+всплывёт. Кандидаты, обнаруженные при планировании — проверить и записать, если
+подтвердятся своими глазами:
+
+- `README.md:36` — таблица маршрутов обещает для `POST /quote` коды
+  «200, 400, 404, 415»: `404` для POST-ветки недостижим, а появившийся `405`
+  для не-POST методов в таблице не назван. Сценарий приёмки проходит и без
+  правки документации, поэтому строка не входит в эту ветку.
+- `OPTIONS /quote` теперь тоже отвечает `405` — отдельного ответа на `OPTIONS`
+  (и CORS) у сервиса нет нигде.
+
+Честно незакрытых находок нет — файла не создавать.
+
+- [ ] **Step 3: Записать `.reflect.md`**
+
+Три раздела по строке на пункт: `## Намерение` — почему guard до POST-ветки и
+статики, а не внутри неё; `## Допущения` — что принято на веру (например, что
+`405` не должен считаться визитом в метриках); `## Сомнения` — что стоит
+перепроверить человеку.
+
+- [ ] **Step 4: Оставить рабочее дерево для workflow**
+
+Ничего не коммитить и не пушить: коммит, пуш и PR делает workflow после агента.
+Проверить `git status --short` — в изменениях только файлы из Task 2.
+
+---
+
+## Вне MVP
+
+Не входит в эту ветку — сценарий приёмки проходит и без этого. По кандидатурам
+снимаются находки в `.followups.md` (Task 3, Step 2), SubIssue по ним заводит
+контур.
+
+1. **Таблица маршрутов в `README.md:36`.** После правки для `POST /quote`
+   реальны коды `200, 400, 405, 413, 415`, а не «200, 400, 404, 415».
+   Документацию стоит привести в соответствие, но на curl-сценарий она не
+   влияет; если ревьюер согласен, её можно донести в этом же PR отдельной
+   строкой диффа — решение за ревьюером, не за исполнителем.
+2. **`OPTIONS` и CORS.** Ни один эндпоинт не отвечает на `OPTIONS` отдельно;
+   `/quote` теперь отвечает `405` и там. Для демо-стенда этого достаточно.
+3. **`HEAD /quote`.** Тоже `405` с `Allow: POST`. Это корректно (GET на
+   `/quote` нет, пары GET/HEAD не возникает), но поведение стоит знать при
+   ревью.
+4. **Общий fallback `404`.** Неизвестный путь при любом методе по-прежнему
+   отвечает `404 {"error":"не найдено"}` — границы Issue это не трогают.
+</file>
+
+<file path=".openhands/task-rules.md">
+## Как работать
+
+Правила репозитория — в `CLAUDE.md` и `AGENTS.md`, они обязательны. Ключевое:
+
+1. **MVP первым.** Делай кратчайший путь к HowToDemo из Issue. Не углубляйся в
+   надёжность, оптимизацию и редкие ветки, пока MVP не работает.
+
+2. **Edge-кейс — не в эту ветку.** Любой найденный по дороге edge-кейс, риск или
+   «надо бы потом учесть» в текущей ветке НЕ чинишь. Запиши его в файл
+   `.followups.md` в корне рабочего каталога — по одному разделу на находку:
+
+   ```markdown
+   ## Отрицательная цена позиции проходит в расчёт
+
+   `subtotal` проверяет `price < 0` уже после умножения на `qty`
+   (src/pricing.mjs:26). Всплывёт на импорте прайса из внешней системы.
+   ```
+
+   Issue по находкам заведёт контур — своим токеном, с `origin:agent` и ключом
+   цепочки `root-issue: #N`, и сам оставит ссылки комментарием в родителе.
+   `gh` и GITHUB_TOKEN тебе не дают намеренно: ты исполняешь код репозитория, и
+   токен рядом с этим кодом — лишний радиус поражения.
+
+   Ничего честно незакрытого не нашёл — файла не создавай. Выдумывать находки
+   ради галочки не надо.
+
+3. **Тесты.** Прогоняй ту же проверку, что и CI (`.github/workflows/ci.yml`):
+   `node --test "tests/*.test.mjs"`. Новая логика — новый тест: правка расчёта
+   без теста на неё в этом репозитории считается незавершённой.
+   Красный прогон в PR не отдаём.
+
+4. **Коммитить самому не надо** — коммит, пуш и PR делает workflow после тебя.
+   Просто оставь рабочее дерево в нужном состоянии.
+</file>
+
+<file path="src/metrics.mjs">
+/**
+ * Модуль метрик посещений и успешных транзакций.
+ * Экспортирует замыкание с счётчиками и функциями управления.
+ *
+ * **Ограничение хранение:** Счётчики хранятся в памяти процесса и сбрасываются при
+ * перезапуске сервиса. Это осознанное архитектурное решение демо-сервиса: отсутствие
+ * персистентности упрощает код и позволяет сосредоточиться на контуре производства,
+ * а не на хранении данных. На графиках метрики будут обнуляться после каждого
+ * перезапуска, что является свойством архитектуры, а не ошибкой.
+ */
+export const counters = (() => {
+  let visits = 0;
+  let successes = 0;
+
+  return {
+    /**
+     * Инкремент счётчика посещений.
+     * Вызывается при каждом POST /quote.
+     * @returns {void}
+     */
+    incVisit: () => {
+      visits += 1;
+    },
+
+    /**
+     * Инкремент счётчика успешных транзакций.
+     * Вызывается при каждом успешном quote() (HTTP 200).
+     * @returns {void}
+     */
+    incSuccess: () => {
+      successes += 1;
+    },
+
+    /**
+     * Получение текущих значений счётчиков.
+     * @returns {{visits: number, successes: number}}
+     */
+    getStats: () => ({
+      visits,
+      successes
+    })
+  };
+})();
+</file>
+
+<file path="src/pricing.mjs">
+// Расчёт стоимости заказа. Чистые функции без ввода-вывода: цена — то, что
+// проверяется тестом построчно, и подмешивать сюда сеть значило бы проверять
+// вместе с ней.
+
+import { createHash } from 'node:crypto';
+
+export const DELIVERY_FEE = 300;
+
+// Порог бесплатной доставки. Заказ ровно на пороге доставку уже не платит:
+// «от 3000» в тексте оферты означает включительно, и расхождение здесь стоило
+// бы дороже, чем читается.
+export const FREE_DELIVERY_FROM = 3000;
+
+// Минимальная сумма заказа для оформления.
+export const MIN_ORDER_AMOUNT = 1000;
+
+// Реестр промокодов. При расширении типов скидок (фиксированная сумма, "2+1")
+// следует вынести логику в отдельный модуль.
+// Поддерживает обе структуры: {percent, activeUntil} и {discount, description}
+export const PROMO_CODES = {
+  // Из feature/1-openhands
+  'WELCOME10': { percent: 10, activeUntil: null },
+  'SUMMER20': { percent: 20, activeUntil: '2026-09-01' },
+  'FALL15': { percent: 15, activeUntil: '2026-12-01' },
+  // Из origin/main
+  'SALE10': { discount: 0.10, description: 'Скидка 10%' }
+};
+
+// Реестр платежных провайдеров. При расширении — добавить новые записи.
+export const PAYMENT_PROVIDERS = {
+  CLOUDPAYMENTS: 'cloudpayments'
+};
+
+// Валюта операций
+export const CURRENCY = 'RUB';
+/**
+ * Позиция заказа: цена за штуку в рублях и количество.
+ * @typedef {{sku: string, price: number, qty: number}} Item
+ */
+
+/**
+ * Сумма позиций без доставки.
+ * @param {Item[]} items
+ */
+export function subtotal(items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error('заказ без позиций');
+  }
+  return items.reduce((sum, item) => {
+    if (!Number.isFinite(item.price) || item.price < 0) {
+      throw new Error(`некорректная цена в позиции ${item.sku}`);
+    }
+    if (!Number.isInteger(item.qty) || item.qty <= 0) {
+      throw new Error(`некорректное количество в позиции ${item.sku}`);
+    }
+    return sum + item.price * item.qty;
+  }, 0);
+}
+
+/**
+ * Стоимость доставки для суммы заказа.
+ * @param {number} amount
+ */
+export function deliveryFee(amount) {
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw new Error('некорректная сумма заказа');
+  }
+  return amount >= FREE_DELIVERY_FROM ? 0 : DELIVERY_FEE;
+}
+
+/**
+ * Валидация промо-кода. Возвращает скидку или null для невалидного кода.
+ * Поддерживает обе структуры: {percent, activeUntil} и {discount, description}
+ * @param {string} code
+ * @param {Date} now
+ */
+function validatePromoCode(code, now = new Date()) {
+  const config = PROMO_CODES[code];
+  if (!config) return null;
+  
+  // Проверка срока действия для структуры с activeUntil
+  if (config.activeUntil && new Date(config.activeUntil) < now) return null;
+  
+  // Поддержка обеих структур discount/percent
+  const discount = config.discount !== undefined ? config.discount : (config.percent / 100);
+  return discount;
+}
+
+/**
+ * Расчёт суммы скидки в рублях.
+ * Возвращает 0 для неизвестного промо-кода.
+ * @param {number} goods
+ * @param {string|null} promoCode
+ */
+export function discountAmount(goods, promoCode) {
+  if (!promoCode) return 0;
+  const discount = validatePromoCode(promoCode);
+  if (discount === null) {
+    return 0;
+  }
+  return goods * discount;
+}
+
+/**
+ * Генерация invoiceId на основе хеша от состава заказа.
+ * Детерминированный для одного состава, уникальный для разных попыток.
+ * @param {Item[]} items — позиции заказа
+ * @param {string|null} promoCode — промокод (если есть)
+ * @param {number} seq — номер попытки (по умолчанию 1)
+ * @returns {string} — invoiceId формата INV-XXXXXXXX-NN
+ */
+function generateInvoiceId(items, promoCode, seq = 1) {
+  // Хеш только от состава заказа — детерминированность
+  const params = JSON.stringify({ items, promoCode });
+  const hash = createHash('sha256').update(params).digest('hex');
+  const hashHex = hash.substring(0, 8).toUpperCase();
+  return `INV-${hashHex}-${seq}`;
+}
+
+/**
+ * Итог заказа: позиции, доставка, скидка по промокоду, способ оплаты, сумма.
+ * Возвращает скидку 0 и promoStatus 'unknown' для неизвестного промо-кода.
+ * @param {Item[]} items
+ * @param {string|null} promoCode — опциональный промокод
+ * @param {string|null} paymentMethod — опциональный способ оплаты
+ * @param {number} invoiceSeq — номер попытки оплаты (для уникальности invoiceId)
+ */
+export function quote(items, promoCode = null, paymentMethod = null, invoiceSeq = 1) {
+  const goods = subtotal(items);
+  if (goods < MIN_ORDER_AMOUNT) {
+    throw new Error(`минимальная сумма заказа ${MIN_ORDER_AMOUNT}, не хватает ${MIN_ORDER_AMOUNT - goods}`);
+  }
+  const delivery = deliveryFee(goods); // Порог считается ДО скидки
+
+  let discount = 0;
+  let promoStatus = 'none';
+
+  if (promoCode) {
+    const discountValue = validatePromoCode(promoCode);
+    if (discountValue !== null) {
+      // Скидка только на товары, доставка не скидывается
+      // Округление до 2 знаков после запятой для избежания ошибок плавающей точки
+      discount = Math.round(goods * discountValue * 100) / 100;
+      promoStatus = 'applied';
+    } else {
+      promoStatus = 'unknown';
+    }
+  }
+
+  // total = товары - скидка + доставка
+  const total = goods - discount + delivery;
+
+  // Логика платежного метода
+  let payment = null;
+  let paymentStatus = 'none';
+
+  if (paymentMethod) {
+    if (paymentMethod === PAYMENT_PROVIDERS.CLOUDPAYMENTS) {
+      payment = {
+        provider: paymentMethod,
+        amount: total,
+        currency: CURRENCY,
+        invoiceId: generateInvoiceId(items, promoCode, invoiceSeq)
+      };
+      paymentStatus = 'ready';
+    } else {
+      const supportedMethods = Object.values(PAYMENT_PROVIDERS).join(', ');
+      throw new Error(`неизвестный способ оплаты: ${paymentMethod}. Доступные способы: ${supportedMethods}`);
+    }
+  }
+
+  return { goods, delivery, discount, promoStatus, total, payment, paymentStatus };
+}
+</file>
+
+<file path="src/server.mjs">
+// HTTP-обёртка вокруг расчёта. Тонкая намеренно: вся арифметика в pricing.mjs
+// и проверяется без сети, здесь остаётся только разбор запроса и коды ответов.
+
+import { createServer } from 'node:http';
+import { readFileSync, statSync, realpathSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { quote } from './pricing.mjs';
+import { counters } from './metrics.mjs';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const STATIC_DIR = join(__dirname, '../static');
+
+const MIME_TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+};
+
+const PORT = Number(process.env.PORT || 8080);
+
+function send(res, code, body, extraHeaders = {}) {
+  const payload = JSON.stringify(body);
+  res.writeHead(code, {
+    'content-type': 'application/json; charset=utf-8',
+    'content-length': Buffer.byteLength(payload),
+    ...extraHeaders
+  });
+  res.end(payload);
+}
+
+function sendStatic(res, filePath) {
+  try {
+    const ext = filePath.split('.').pop().toLowerCase();
+    const mimeType = MIME_TYPES[`.${ext}`] || 'application/octet-stream';
+    
+    const content = readFileSync(filePath);
+    res.writeHead(200, {
+      'content-type': mimeType,
+      'content-length': Buffer.byteLength(content),
+    });
+    res.end(content);
+  } catch (err) {
+    send(res, 404, { error: 'файл не найден' });
+  }
+}
+
+function serveStatic(url) {
+  // Remove leading slash and decode URI
+  const path = url === '/' ? '/index.html' : url;
+  const decodedPath = decodeURIComponent(path);
+  const filePath = join(STATIC_DIR, decodedPath);
+  
+  try {
+    // Security: resolve the canonical path first before any file system operations
+    const realPath = realpathSync(filePath);
+    
+    // Security check: ensure the resolved path is within STATIC_DIR
+    const normalizedStatic = STATIC_DIR.replace(/\\/g, '/');
+    const normalizedFile = realPath.replace(/\\/g, '/');
+    
+    if (!normalizedFile.startsWith(normalizedStatic)) {
+      return null;
+    }
+    
+    // Check if the path points to a regular file (after security validation)
+    const stats = statSync(realPath);
+    if (!stats.isFile()) {
+      return null;
+    }
+    
+    return realPath;
+  } catch {
+    return null;
+  }
+}
+
+async function readJson(req, maxSize = 64 * 1024) {
+  const chunks = [];
+  let totalSize = 0;
+  
+  for await (const chunk of req) {
+    totalSize += chunk.length;
+    if (totalSize > maxSize) {
+      const error = new Error(`Payload too large: ${totalSize} bytes exceeds limit of ${maxSize} bytes`);
+      error.code = 'ERR_HTTP_PAYLOAD_TOO_LARGE';
+      throw error;
+    }
+    chunks.push(chunk);
+  }
+  
+  if (chunks.length === 0) return null;
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+}
+
+export const app = async (req, res) => {
+  const url = new URL(req.url, 'http://localhost');
+  const pathname = url.pathname;
+
+  if (pathname === '/healthz') {
+    if (req.method !== 'GET') {
+      return send(res, 405, { error: 'Method Not Allowed' }, { 'Allow': 'GET' });
+    }
+    return send(res, 200, {
+      status: 'ok',
+      uptime_sec: Math.floor(process.uptime())
+    });
+  }
+
+  if (pathname === '/stats') {
+    if (req.method !== 'GET') {
+      return send(res, 405, { error: 'Method Not Allowed' }, { 'Allow': 'GET' });
+    }
+    return send(res, 200, counters.getStats());
+  }
+
+  // Не POST на /quote — 405 с Allow, как у /healthz и /stats: без guard-а
+  // запрос проваливается в раздачу статики и отвечает 404 про файл.
+  if (pathname === '/quote' && req.method !== 'POST') {
+    return send(res, 405, { error: 'Method Not Allowed' }, { 'Allow': 'POST' });
+  }
+
+  if (pathname === '/quote' && req.method === 'POST') {
+    counters.incVisit();
+    
+    // Проверка Content-Type до попытки парсинга JSON
+    const contentType = req.headers['content-type'];
+    if (!contentType || !contentType.startsWith('application/json')) {
+      return send(res, 415, { error: 'ожидается Content-Type: application/json' });
+    }
+    
+    let body;
+    try {
+      body = await readJson(req);
+    } catch (err) {
+      if (err.code === 'ERR_HTTP_PAYLOAD_TOO_LARGE') {
+        return send(res, 413, { error: err.message });
+      }
+      // Битый JSON — ошибка запроса, а не сервера: 500 здесь увёл бы разбор в
+      // логи сервиса вместо ответа клиенту.
+      return send(res, 400, { error: 'тело запроса не разобралось как JSON' });
+    }
+    try {
+      // Поддержка обоих параметров для обратной совместимости
+      const promoCode = body?.promoCode ?? body?.promo;
+      const result = quote(
+        body?.items,
+        promoCode,
+        body?.paymentMethod,
+        body?.invoiceSeq
+      );
+      counters.incSuccess();
+      return send(res, 200, result);
+    } catch (err) {
+      return send(res, 400, { error: err.message });
+    }
+  }
+
+  // Serve static files for GET requests
+  if (req.method === 'GET') {
+    const staticPath = serveStatic(req.url);
+    if (staticPath) {
+      return sendStatic(res, staticPath);
+    }
+  }
+
+  return send(res, 404, { error: 'не найдено' });
+};
+
+// Запуск только при прямом вызове: тест импортирует `app` и поднимать порт
+// ради этого не должен.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  createServer(app).listen(PORT, () => {
+    console.log(`checkout слушает :${PORT}`);
+  });
+}
+</file>
+
+<file path="static/app.js">
+document.getElementById('order-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const sku = document.getElementById('sku').value.trim();
+    const price = parseFloat(document.getElementById('price').value);
+    const quantity = parseInt(document.getElementById('quantity').value);
+    
+    const resultDiv = document.getElementById('result');
+    const errorDiv = document.getElementById('error');
+    const calculateBtn = document.getElementById('calculate-btn');
+    
+    // Validate input
+    if (!sku) {
+        showError('SKU товара обязателен');
+        return;
+    }
+    
+    if (isNaN(price) || price < 0) {
+        showError('Цена должна быть положительным числом');
+        return;
+    }
+    
+    if (isNaN(quantity) || quantity < 1) {
+        showError('Количество должно быть положительным целым числом');
+        return;
+    }
+    
+    // Hide previous results
+    resultDiv.classList.add('hidden');
+    errorDiv.classList.add('hidden');
+    
+    // Disable button and show loading state
+    calculateBtn.disabled = true;
+    calculateBtn.textContent = 'Расчёт...';
+    
+    try {
+        const response = await fetch('/quote', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                items: [{ sku, price, qty: quantity }]
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Ошибка расчёта');
+        }
+        
+        // Display results
+        document.getElementById('goods-amount').textContent = formatCurrency(data.goods);
+        document.getElementById('delivery-amount').textContent = formatCurrency(data.delivery);
+        document.getElementById('total-amount').textContent = formatCurrency(data.total);
+        
+        resultDiv.classList.remove('hidden');
+    } catch (error) {
+        showError(error.message);
+    } finally {
+        calculateBtn.disabled = false;
+        calculateBtn.textContent = 'Рассчитать';
+    }
+});
+
+function showError(message) {
+    const errorDiv = document.getElementById('error');
+    errorDiv.textContent = message;
+    errorDiv.classList.remove('hidden');
+}
+
+function formatCurrency(amount) {
+    return new Intl.NumberFormat('ru-RU', {
+        style: 'currency',
+        currency: 'RUB',
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2
+    }).format(amount);
+}
+</file>
+
+<file path="static/index.html">
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Расчёт стоимости заказа</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Расчёт стоимости заказа</h1>
+        
+        <form id="order-form">
+            <div class="form-group">
+                <label for="sku">SKU товара:</label>
+                <input type="text" id="sku" name="sku" required placeholder="ABC123">
+            </div>
+            
+            <div class="form-group">
+                <label for="price">Цена (₽):</label>
+                <input type="number" id="price" name="price" required min="0" step="0.01" placeholder="1000">
+            </div>
+            
+            <div class="form-group">
+                <label for="quantity">Количество:</label>
+                <input type="number" id="quantity" name="quantity" required min="1" step="1" placeholder="1">
+            </div>
+            
+            <button type="submit" id="calculate-btn">Рассчитать</button>
+        </form>
+        
+        <div id="result" class="result hidden">
+            <h2>Результат расчёта</h2>
+            <div class="result-row">
+                <span class="label">Товары:</span>
+                <span class="value" id="goods-amount">0 ₽</span>
+            </div>
+            <div class="result-row">
+                <span class="label">Доставка:</span>
+                <span class="value" id="delivery-amount">0 ₽</span>
+            </div>
+            <div class="result-row total">
+                <span class="label">Итого:</span>
+                <span class="value" id="total-amount">0 ₽</span>
+            </div>
+        </div>
+        
+        <div id="error" class="error hidden"></div>
+    </div>
+    
+    <script src="app.js"></script>
+</body>
+</html>
+</file>
+
+<file path="static/style.css">
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background-color: #f5f5f5;
+    color: #1a1a1a;
+    line-height: 1.5;
+    padding: 20px;
+}
+
+.container {
+    max-width: 500px;
+    margin: 0 auto;
+    background: white;
+    padding: 30px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+h1 {
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 24px;
+    color: #1a1a1a;
+}
+
+h2 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: #1a1a1a;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+label {
+    display: block;
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 6px;
+    color: #1a1a1a;
+}
+
+input {
+    width: 100%;
+    padding: 10px 12px;
+    font-size: 15px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    background: white;
+    color: #1a1a1a;
+    transition: border-color 0.2s;
+}
+
+input:focus {
+    outline: none;
+    border-color: #1a1a1a;
+}
+
+input::placeholder {
+    color: #999;
+}
+
+button {
+    width: 100%;
+    padding: 12px;
+    font-size: 15px;
+    font-weight: 600;
+    background: #1a1a1a;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+button:hover:not(:disabled) {
+    background: #333;
+}
+
+button:disabled {
+    background: #999;
+    cursor: not-allowed;
+}
+
+.result {
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 1px solid #eee;
+}
+
+.result-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    font-size: 15px;
+}
+
+.result-row.total {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #eee;
+    font-weight: 600;
+    font-size: 18px;
+}
+
+.label {
+    color: #666;
+}
+
+.value {
+    color: #1a1a1a;
+    font-weight: 500;
+}
+
+.error {
+    margin-top: 20px;
+    padding: 12px;
+    background: #fee;
+    border: 1px solid #fcc;
+    border-radius: 6px;
+    color: #c33;
+    font-size: 14px;
+}
+
+.hidden {
+    display: none;
+}
+</file>
+
+<file path="tests/healthz.test.mjs">
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { createServer } from 'node:http';
+import { app } from '../src/server.mjs';
+
+test('GET /healthz возвращает статус и время работы', async () => {
+  const server = createServer(app);
+  const port = 0; // случайный свободный порт
+
+  await new Promise(resolve => server.listen(port, resolve));
+
+  const res = await fetch(`http://localhost:${server.address().port}/healthz`);
+  const body = await res.json();
+
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'application/json; charset=utf-8');
+  assert.equal(body.status, 'ok');
+  assert.equal(typeof body.uptime_sec, 'number');
+  assert.ok(Number.isInteger(body.uptime_sec));
+  assert.ok(body.uptime_sec >= 0);
+
+  server.close();
+});
+</file>
+
+<file path="tests/metrics.test.mjs">
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { counters } from '../src/metrics.mjs';
+
+test('начальное состояние — нули', () => {
+  const stats = counters.getStats();
+  assert.equal(stats.visits, 0);
+  assert.equal(stats.successes, 0);
+});
+
+test('incVisit инкрементирует visits', () => {
+  const before = counters.getStats().visits;
+  counters.incVisit();
+  const after = counters.getStats().visits;
+  assert.equal(after, before + 1);
+});
+
+test('incSuccess инкрементирует successes', () => {
+  const before = counters.getStats().successes;
+  counters.incSuccess();
+  const after = counters.getStats().successes;
+  assert.equal(after, before + 1);
+});
+
+test('getStats возвращает объект с числами', () => {
+  counters.incVisit();
+  counters.incSuccess();
+  const stats = counters.getStats();
+  assert.equal(typeof stats.visits, 'number');
+  assert.equal(typeof stats.successes, 'number');
+});
+
+test('несколько вызовов incVisit накапливаются', () => {
+  const before = counters.getStats().visits;
+  counters.incVisit();
+  counters.incVisit();
+  counters.incVisit();
+  const after = counters.getStats().visits;
+  assert.equal(after, before + 3);
+});
+
+test('несколько вызовов incSuccess накапливаются', () => {
+  const before = counters.getStats().successes;
+  counters.incSuccess();
+  counters.incSuccess();
+  const after = counters.getStats().successes;
+  assert.equal(after, before + 2);
+});
+
+test('visits и successes независимы', () => {
+  const beforeVisits = counters.getStats().visits;
+  const beforeSuccesses = counters.getStats().successes;
+  
+  counters.incVisit();
+  counters.incVisit();
+  
+  const afterVisits = counters.getStats().visits;
+  const afterSuccesses = counters.getStats().successes;
+  
+  assert.equal(afterVisits, beforeVisits + 2);
+  assert.equal(afterSuccesses, beforeSuccesses);
+});
+</file>
+
+<file path="tests/pricing.test.mjs">
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+
+import {
+  MIN_ORDER_AMOUNT,
+  DELIVERY_FEE,
+  FREE_DELIVERY_FROM,
+  deliveryFee,
+  quote,
+  subtotal,
+  discountAmount,
+  PROMO_CODES,
+} from '../src/pricing.mjs';
+
+test('сумма позиций считается по количеству, а не по числу строк', () => {
+  assert.equal(subtotal([{ sku: 'a', price: 500, qty: 3 }]), 1500);
+});
+
+test('заказ без позиций — ошибка, а не ноль', () => {
+  // Ноль прошёл бы дальше как валидный заказ на 300 рублей доставки.
+  assert.throws(() => subtotal([]), /без позиций/);
+});
+
+test('отрицательная цена не проходит', () => {
+  assert.throws(() => subtotal([{ sku: 'a', price: -1, qty: 1 }]), /цена/);
+});
+
+test('дробное количество не проходит', () => {
+  assert.throws(() => subtotal([{ sku: 'a', price: 100, qty: 1.5 }]), /количество/);
+});
+
+test('доставка платная ниже порога', () => {
+  assert.equal(deliveryFee(FREE_DELIVERY_FROM - 1), DELIVERY_FEE);
+});
+
+test('на пороге доставка уже бесплатна', () => {
+  // «от 3000» в оферте означает включительно.
+  assert.equal(deliveryFee(FREE_DELIVERY_FROM), 0);
+});
+
+test('итог складывает товары и доставку', () => {
+  assert.deepEqual(quote([{ sku: 'a', price: 1000, qty: 1 }]), {
+    goods: 1000,
+    delivery: DELIVERY_FEE,
+    discount: 0,
+    promoStatus: 'none',
+    total: 1300,
+    payment: null,
+    paymentStatus: 'none',
+  });
+});
+
+test('заказ ниже минимальной суммы — ошибка с точной суммой нехватки', () => {
+  // Заказ на 500 руб при пороге 1000
+  assert.throws(() => quote([{ sku: 'a', price: 500, qty: 1 }]), /минимальная сумма/);
+});
+
+test('крупный заказ едет без платы за доставку', () => {
+  assert.deepEqual(quote([{ sku: 'a', price: 3500, qty: 1 }]), {
+    goods: 3500,
+    discount: 0,
+    delivery: 0,
+    promoStatus: 'none',
+    total: 3500,
+    payment: null,
+    paymentStatus: 'none',
+  });
+});
+
+// Промо-коды из feature/1-openhands
+test('промо-код WELCOME10 даёт 10% скидку', () => {
+  const result = quote([{ sku: 'a', price: 1000, qty: 2 }], 'WELCOME10');
+  assert.equal(result.goods, 2000);
+  assert.equal(result.discount, 200);
+  assert.equal(result.delivery, 300); // Порог не достигнут (2000 < 3000)
+  assert.equal(result.total, 2100);
+  assert.equal(result.promoStatus, 'applied');
+});
+
+test('отрицательная сумма заказа не проходит', () => {
+  assert.throws(() => deliveryFee(-100), /сумма заказа/);
+});
+
+test('NaN в качестве суммы заказа не проходит', () => {
+  assert.throws(() => deliveryFee(NaN), /сумма заказа/);
+});
+
+test('граница порога: 2999 руб — доставка платная', () => {
+  assert.equal(deliveryFee(2999), DELIVERY_FEE);
+});
+
+test('граница порога: ровно 3000 руб — доставка бесплатна', () => {
+  assert.equal(deliveryFee(3000), 0);
+});
+
+test('граница порога: 3001 руб — доставка бесплатна', () => {
+  assert.equal(deliveryFee(3001), 0);
+});
+
+test('промокод не передан — статус none, скидка 0', () => {
+  assert.deepEqual(quote([{ sku: 'a', price: 1000, qty: 1 }]), {
+    goods: 1000,
+    delivery: DELIVERY_FEE,
+    discount: 0,
+    promoStatus: 'none',
+    total: 1300,
+    payment: null,
+    paymentStatus: 'none',
+  });
+});
+
+test('промо-код SUMMER20 даёт 20% скидку', () => {
+  const result = quote([{ sku: 'a', price: 3000, qty: 1 }], 'SUMMER20');
+  assert.equal(result.goods, 3000);
+  assert.equal(result.discount, 600);
+  assert.equal(result.delivery, 0); // Порог достигнут по goods (3000 >= 3000)
+  assert.equal(result.total, 2400);
+  assert.equal(result.promoStatus, 'applied');
+});
+
+test('промо-код FALL15 даёт 15% скидку с бесплатной доставкой', () => {
+  const result = quote([{ sku: 'a', price: 3500, qty: 1 }], 'FALL15');
+  assert.equal(result.goods, 3500);
+  assert.equal(result.discount, 525);
+  assert.equal(result.delivery, 0);
+  assert.equal(result.total, 2975);
+  assert.equal(result.promoStatus, 'applied');
+});
+
+test('неизвестный промо-код — статус unknown, скидка 0', () => {
+  assert.deepEqual(quote([{ sku: 'a', price: 1000, qty: 1 }], 'INVALID'), {
+    goods: 1000,
+    delivery: DELIVERY_FEE,
+    discount: 0,
+    promoStatus: 'unknown',
+    total: 1300,
+    payment: null,
+    paymentStatus: 'none',
+  });
+});
+
+test('порог доставки считается до скидки', () => {
+  // 3000 товаров без скидки → доставка 0
+  // 3000 товаров со скидкой 20% → доставка всё ещё 0
+  const result = quote([{ sku: 'a', price: 3000, qty: 1 }], 'SUMMER20');
+  assert.equal(result.goods, 3000);
+  assert.equal(result.discount, 600);
+  assert.equal(result.delivery, 0); // Порог достигнут по goods (3000 >= 3000)
+  assert.equal(result.total, 2400);
+});
+
+test('discountAmount без кода возвращает 0', () => {
+  assert.equal(discountAmount(1000, null), 0);
+  assert.equal(discountAmount(1000, undefined), 0);
+});
+
+test('discountAmount с неизвестным кодом возвращает 0', () => {
+  assert.equal(discountAmount(1000, 'UNKNOWN'), 0);
+});
+
+test('discountAmount с валидным кодом считает скидку', () => {
+  assert.equal(discountAmount(1000, 'WELCOME10'), 100);
+  assert.equal(discountAmount(2000, 'SUMMER20'), 400);
+});
+
+test('единое поведение функций при неизвестном промо-коде', () => {
+  const items = [{ sku: 'a', price: 1000, qty: 1 }];
+  const invalidCode = 'INVALID_CODE';
+  
+  // quote() возвращает скидку 0 и статус 'unknown'
+  const quoteResult = quote(items, invalidCode);
+  assert.equal(quoteResult.discount, 0);
+  assert.equal(quoteResult.promoStatus, 'unknown');
+  
+  // discountAmount() тоже возвращает 0 (то же поведение)
+  const goods = subtotal(items);
+  const discountResult = discountAmount(goods, invalidCode);
+  assert.equal(discountResult, 0);
+  
+  // Обе функции обрабатывают неизвестный код одинаково — возвращают 0
+  assert.equal(quoteResult.discount, discountResult);
+});
+
+// Промо-коды из origin/main
+test('промокод SALE10 даёт 10% скидки', () => {
+  assert.deepEqual(quote([{ sku: 'a', price: 1000, qty: 2 }], 'SALE10'), {
+    goods: 2000,
+    delivery: 300,
+    discount: 200,
+    promoStatus: 'applied',
+    total: 2100,
+    payment: null,
+    paymentStatus: 'none',
+  });
+});
+
+test('доставка не скидывается при применении промокода', () => {
+  // Товары на 2500, доставка 300. Скидка 10% = 250.
+  // Итог: 2500 - 250 + 300 = 2550 (доставка платная, т.к. goods ДО скидки = 2500 < 3000)
+  const result = quote([{ sku: 'a', price: 2500, qty: 1 }], 'SALE10');
+  assert.equal(result.goods, 2500);
+  assert.equal(result.discount, 250);
+  assert.equal(result.delivery, 300); // доставка считается по goods ДО скидки
+  assert.equal(result.total, 2550);
+  assert.equal(result.payment, null);
+  assert.equal(result.paymentStatus, 'none');
+});
+
+// === Payment Method Tests ===
+
+test('paymentMethod=cloudpayments добавляет блок payment', () => {
+  const result = quote([{ sku: 'a', price: 1000, qty: 2 }], null, 'cloudpayments');
+  assert.equal(result.payment.provider, 'cloudpayments');
+  assert.equal(result.payment.amount, 2300);  // 2000 + 300 delivery
+  assert.equal(result.payment.currency, 'RUB');
+  assert.ok(result.payment.invoiceId);  // не пустой
+  assert.match(result.payment.invoiceId, /^INV-[0-9A-F]{8}-1$/);  // формат INV-XXXXXXXX-1
+  assert.equal(result.paymentStatus, 'ready');
+});
+
+test('paymentMethod с промокодом — payment.amount = total', () => {
+  const result = quote([{ sku: 'a', price: 1000, qty: 2 }], 'SALE10', 'cloudpayments');
+  assert.equal(result.goods, 2000);
+  assert.equal(result.discount, 200);  // 10% от 2000
+  assert.equal(result.total, 2100);  // 2000 - 200 + 300
+  assert.equal(result.payment.amount, 2100);
+  assert.equal(result.paymentStatus, 'ready');
+});
+
+test('невалидный paymentMethod — ошибка 400', () => {
+  assert.throws(() => quote([{ sku: 'a', price: 1000, qty: 1 }], null, 'stripe'), /неизвестный способ оплаты/);
+});
+
+test('ошибка неизвестного способа оплаты содержит список доступных', () => {
+  assert.throws(() => {
+    quote([{ sku: 'a', price: 1000, qty: 1 }], null, 'invalid_method');
+  }, /неизвестный способ оплаты: invalid_method/);
+  
+  assert.throws(() => {
+    quote([{ sku: 'a', price: 1000, qty: 1 }], null, 'invalid_method');
+  }, /Доступные способы: cloudpayments/);
+});
+
+test('без paymentMethod — статус none, payment=null', () => {
+  const result = quote([{ sku: 'a', price: 1000, qty: 1 }]);
+  assert.equal(result.paymentStatus, 'none');
+  assert.equal(result.payment, null);
+});
+
+test('invoiceSeq влияет на invoiceId', () => {
+  const items = [{ sku: 'a', price: 1000, qty: 1 }];
+  const result1 = quote(items, null, 'cloudpayments', 1);
+  const result2 = quote(items, null, 'cloudpayments', 2);
+  assert.notEqual(result1.payment.invoiceId, result2.payment.invoiceId);
+  assert.match(result1.payment.invoiceId, /-1$/);
+  assert.match(result2.payment.invoiceId, /-2$/);
+});
+
+test('invoiceId детерминирован для одного состава', () => {
+  const items = [{ sku: 'a', price: 1000, qty: 1 }];
+  const result1 = quote(items, 'SALE10', 'cloudpayments', 1);
+  const result2 = quote(items, 'SALE10', 'cloudpayments', 1);
+  assert.equal(result1.payment.invoiceId, result2.payment.invoiceId);
+});
+
+test('paymentMethod с бесплатной доставкой', () => {
+  const result = quote([{ sku: 'a', price: 3500, qty: 1 }], null, 'cloudpayments');
+  assert.equal(result.goods, 3500);
+  assert.equal(result.delivery, 0);
+  assert.equal(result.total, 3500);
+  assert.equal(result.payment.amount, 3500);
+  assert.equal(result.paymentStatus, 'ready');
+});
+
+test('paymentMethod с невалидным промокодом', () => {
+  const result = quote([{ sku: 'a', price: 1000, qty: 2 }], 'INVALID', 'cloudpayments');
+  assert.equal(result.promoStatus, 'unknown');
+  assert.equal(result.discount, 0);
+  assert.equal(result.total, 2300);  // 2000 + 300 delivery
+  assert.equal(result.payment.amount, 2300);
+  assert.equal(result.paymentStatus, 'ready');
+});
+</file>
+
+<file path="tests/server.test.mjs">
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { app } from '../src/server.mjs';
+import { counters } from '../src/metrics.mjs';
+
+/**
+ * Вспомогательная функция для HTTP-запросов к app().
+ * Симулирует HTTP-запрос без поднятия реального сервера.
+ * 
+ * @param {string} url - путь запроса (например, '/quote')
+ * @param {string} method - HTTP метод (GET, POST, etc.)
+ * @param {object|string|null} body - тело запроса
+ * @param {object} customHeaders - дополнительные заголовки запроса (переопределяют дефолтные)
+ */
+async function request(url, method = 'GET', body = null, customHeaders = {}) {
+  const defaultHeaders = body ? { 'content-type': 'application/json' } : {};
+  const req = {
+    url,
+    method,
+    headers: { ...defaultHeaders, ...customHeaders },
+  };
+
+  const chunks = [];
+  const res = {
+    statusCode: null,
+    headers: {},
+    writeHead: function(code, headers) {
+      this.statusCode = code;
+      this.headers = headers;
+    },
+    write: function(chunk) {
+      if (typeof chunk === 'string') {
+        chunks.push(Buffer.from(chunk));
+      } else {
+        chunks.push(chunk);
+      }
+    },
+    end: function(chunk) {
+      if (chunk) {
+        if (typeof chunk === 'string') {
+          chunks.push(Buffer.from(chunk));
+        } else {
+          chunks.push(chunk);
+        }
+      }
+    },
+  };
+
+  // Если есть тело, имитируем readable stream
+  if (body) {
+    let bodyStr;
+    if (typeof body === 'string') {
+      bodyStr = body;
+    } else {
+      bodyStr = JSON.stringify(body);
+    }
+    req[Symbol.asyncIterator] = async function*() {
+      yield Buffer.from(bodyStr);
+    };
+  } else {
+    req[Symbol.asyncIterator] = async function*() {
+      // Пустой body
+    };
+  }
+
+  await app(req, res);
+
+  const responseBody = Buffer.concat(chunks).toString('utf8');
+  let parsedBody;
+  try {
+    parsedBody = JSON.parse(responseBody);
+  } catch {
+    parsedBody = responseBody;
+  }
+
+  return {
+    statusCode: res.statusCode,
+    headers: res.headers,
+    body: parsedBody,
+  };
+}
+
+test('GET /stats возвращает начальные нули', async () => {
+  const res = await request('/stats', 'GET');
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { visits: 0, successes: 0 });
+});
+
+test('POST /quote инкрементирует visits', async () => {
+  const before = counters.getStats().visits;
+  await request('/quote', 'POST', {
+    items: [{ sku: 'a', price: 1000, qty: 1 }],
+  });
+  const after = counters.getStats().visits;
+  assert.equal(after, before + 1);
+});
+
+test('POST /quote инкрементирует successes при успешном запросе', async () => {
+  const before = counters.getStats().successes;
+  await request('/quote', 'POST', {
+    items: [{ sku: 'a', price: 1000, qty: 1 }],
+  });
+  const after = counters.getStats().successes;
+  assert.equal(after, before + 1);
+});
+
+test('GET /healthz не инкрементирует visits', async () => {
+  const before = counters.getStats().visits;
+  await request('/healthz', 'GET');
+  const after = counters.getStats().visits;
+  assert.equal(after, before);
+});
+
+test('POST /quote с невалидным JSON инкрементирует visits, но не successes', async () => {
+  const beforeVisits = counters.getStats().visits;
+  const beforeSuccesses = counters.getStats().successes;
+  
+  await request('/quote', 'POST', '{invalid json}');
+  
+  const afterVisits = counters.getStats().visits;
+  const afterSuccesses = counters.getStats().successes;
+  
+  assert.equal(afterVisits, beforeVisits + 1);
+  assert.equal(afterSuccesses, beforeSuccesses);
+});
+
+test('POST /quote с пустым заказом инкрементирует visits, но не successes', async () => {
+  const beforeVisits = counters.getStats().visits;
+  const beforeSuccesses = counters.getStats().successes;
+  
+  await request('/quote', 'POST', { items: [] });
+  
+  const afterVisits = counters.getStats().visits;
+  const afterSuccesses = counters.getStats().successes;
+  
+  assert.equal(afterVisits, beforeVisits + 1);
+  assert.equal(afterSuccesses, beforeSuccesses);
+});
+
+test('GET /stats после нескольких запросов возвращает корректные значения', async () => {
+  const beforeVisits = counters.getStats().visits;
+  const beforeSuccesses = counters.getStats().successes;
+  
+  await request('/quote', 'POST', { items: [{ sku: 'a', price: 1000, qty: 1 }] });
+  await request('/quote', 'POST', { items: [{ sku: 'b', price: 2000, qty: 2 }] });
+  await request('/healthz', 'GET');
+  
+  const res = await request('/stats', 'GET');
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.visits, beforeVisits + 2);
+  assert.equal(res.body.successes, beforeSuccesses + 2);
+});
+
+test('GET /healthz возвращает 200 с данными о состоянии', async () => {
+  const res = await request('/healthz', 'GET');
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.status, 'ok');
+  assert.equal(typeof res.body.uptime_sec, 'number');
+  assert.ok(Number.isInteger(res.body.uptime_sec));
+  assert.ok(res.body.uptime_sec >= 0);
+});
+
+test('POST /healthz возвращает 405 с заголовком Allow: GET', async () => {
+  const res = await request('/healthz', 'POST');
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.body.error, 'Method Not Allowed');
+  assert.equal(res.headers['Allow'], 'GET');
+});
+
+test('PUT /healthz возвращает 405 с заголовком Allow: GET', async () => {
+  const res = await request('/healthz', 'PUT');
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.body.error, 'Method Not Allowed');
+  assert.equal(res.headers['Allow'], 'GET');
+});
+
+test('DELETE /healthz возвращает 405 с заголовком Allow: GET', async () => {
+  const res = await request('/healthz', 'DELETE');
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.body.error, 'Method Not Allowed');
+  assert.equal(res.headers['Allow'], 'GET');
+});
+
+test('GET /healthz с query string возвращает 200', async () => {
+  const res = await request('/healthz?probe=1', 'GET');
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.status, 'ok');
+  assert.equal(typeof res.body.uptime_sec, 'number');
+});
+
+test('GET /stats с query string возвращает 200', async () => {
+  const res = await request('/stats?filter=all', 'GET');
+  assert.equal(res.statusCode, 200);
+  assert.equal(typeof res.body.visits, 'number');
+  assert.equal(typeof res.body.successes, 'number');
+});
+
+test('POST /stats возвращает 405 с заголовком Allow: GET', async () => {
+  const res = await request('/stats', 'POST');
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.body.error, 'Method Not Allowed');
+  assert.equal(res.headers['Allow'], 'GET');
+});
+
+test('PUT /stats возвращает 405 с заголовком Allow: GET', async () => {
+  const res = await request('/stats', 'PUT');
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.body.error, 'Method Not Allowed');
+  assert.equal(res.headers['Allow'], 'GET');
+});
+
+test('DELETE /stats возвращает 405 с заголовком Allow: GET', async () => {
+  const res = await request('/stats', 'DELETE');
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.body.error, 'Method Not Allowed');
+  assert.equal(res.headers['Allow'], 'GET');
+});
+
+// === Тесты валидации Content-Type ===
+
+test('POST /quote с Content-Type application/json возвращает 200', async () => {
+  const res = await request('/quote', 'POST', {
+    items: [{ sku: 'a', price: 1000, qty: 1 }],
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.goods, 1000);
+});
+
+test('POST /quote с Content-Type text/plain возвращает 415', async () => {
+  const res = await request('/quote', 'POST', {
+    items: [{ sku: 'a', price: 1000, qty: 1 }],
+  }, {
+    'content-type': 'text/plain'
+  });
+  assert.equal(res.statusCode, 415);
+  assert.equal(res.body.error, 'ожидается Content-Type: application/json');
+});
+
+test('POST /quote без Content-Type возвращает 415', async () => {
+  const res = await request('/quote', 'POST', {
+    items: [{ sku: 'a', price: 1000, qty: 1 }],
+  }, {
+    'content-type': ''
+  });
+  assert.equal(res.statusCode, 415);
+  assert.equal(res.body.error, 'ожидается Content-Type: application/json');
+});
+
+test('POST /quote с Content-Type application/json; charset=utf-8 возвращает 200', async () => {
+  const res = await request('/quote', 'POST', {
+    items: [{ sku: 'a', price: 1000, qty: 1 }],
+  }, {
+    'content-type': 'application/json; charset=utf-8'
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.goods, 1000);
+});
+
+test('POST /quote с Content-Type application/x-www-form-urlencoded возвращает 415', async () => {
+  const res = await request('/quote', 'POST', {
+    items: [{ sku: 'a', price: 1000, qty: 1 }],
+  }, {
+    'content-type': 'application/x-www-form-urlencoded'
+  });
+  assert.equal(res.statusCode, 415);
+  assert.equal(res.body.error, 'ожидается Content-Type: application/json');
+});
+
+test('POST /quote с query string обрабатывается корректно', async () => {
+  const beforeVisits = counters.getStats().visits;
+  const beforeSuccesses = counters.getStats().successes;
+  
+  const res = await request('/quote?test=true', 'POST', {
+    items: [{ sku: 'a', price: 1000, qty: 1 }],
+  });
+  
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.goods, 1000);
+  assert.equal(res.body.delivery, 300);
+  assert.equal(res.body.total, 1300);
+  
+  const afterVisits = counters.getStats().visits;
+  const afterSuccesses = counters.getStats().successes;
+  assert.equal(afterVisits, beforeVisits + 1);
+  assert.equal(afterSuccesses, beforeSuccesses + 1);
+});
+
+test('POST /quote с телом больше 64 КБ возвращает 413', async () => {
+  const beforeVisits = counters.getStats().visits;
+  const beforeSuccesses = counters.getStats().successes;
+  
+  // Создаем тело больше 64 КБ (65 КБ)
+  const largeData = { items: [{ sku: 'a', price: 1000, qty: 1 }] };
+  largeData.largeString = 'x'.repeat(65 * 1024);
+  
+  const res = await request('/quote', 'POST', largeData);
+  
+  assert.equal(res.statusCode, 413);
+  assert.ok(res.body.error);
+  assert.ok(res.body.error.includes('exceeds limit'));
+  
+  const afterVisits = counters.getStats().visits;
+  const afterSuccesses = counters.getStats().successes;
+  assert.equal(afterVisits, beforeVisits + 1);
+  assert.equal(afterSuccesses, beforeSuccesses);
+});
+
+test('POST /quote с телом меньше 64 КБ обрабатывается корректно', async () => {
+  const beforeVisits = counters.getStats().visits;
+  const beforeSuccesses = counters.getStats().successes;
+  
+  // Создаем тело меньше 64 КБ (63 КБ)
+  const normalData = { items: [{ sku: 'a', price: 1000, qty: 1 }] };
+  normalData.normalString = 'x'.repeat(63 * 1024);
+  
+  const res = await request('/quote', 'POST', normalData);
+  
+  assert.equal(res.statusCode, 200);
+  assert.ok(res.body.goods);
+  assert.ok(res.body.total);
+  
+  const afterVisits = counters.getStats().visits;
+  const afterSuccesses = counters.getStats().successes;
+  assert.equal(afterVisits, beforeVisits + 1);
+  assert.equal(afterSuccesses, beforeSuccesses + 1);
+});
+
+// === Метод, отличный от POST, на /quote ===
+
+test('GET /quote возвращает 405 с заголовком Allow: POST', async () => {
+  const res = await request('/quote', 'GET');
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.body.error, 'Method Not Allowed');
+  assert.equal(res.headers['Allow'], 'POST');
+});
+
+test('PUT /quote возвращает 405 с заголовком Allow: POST', async () => {
+  const res = await request('/quote', 'PUT');
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.body.error, 'Method Not Allowed');
+  assert.equal(res.headers['Allow'], 'POST');
+});
+
+test('DELETE /quote возвращает 405 с заголовком Allow: POST', async () => {
+  const res = await request('/quote', 'DELETE');
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.body.error, 'Method Not Allowed');
+  assert.equal(res.headers['Allow'], 'POST');
+});
+
+test('GET /quote не инкрементирует visits', async () => {
+  const before = counters.getStats().visits;
+  await request('/quote', 'GET');
+  const after = counters.getStats().visits;
+  assert.equal(after, before);
+});
+
+test('POST /quote продолжает работать как раньше', async () => {
+  const res = await request('/quote', 'POST', {
+    items: [{ sku: 'a', price: 1000, qty: 1 }],
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.goods, 1000);
+  assert.equal(res.body.delivery, 300);
+  assert.equal(res.body.total, 1300);
+});
+</file>
+
+<file path=".gitignore">
+node_modules/
+.env
+
+# Находки агента разработки: постановка для контура, не часть правки.
+# В режиме local контур снимает файл сам; здесь — страховка от того, чтобы он
+# уехал в PR, если прогон шёл в чужих Actions.
+.followups.md
+</file>
+
+<file path="AGENTS.md">
+# AGENTS.md
+
+Постоянный контекст для агентов, работающих в этом репозитории. Полный свод
+правил — [`CLAUDE.md`](CLAUDE.md); здесь то, что обязано быть в голове ДО первой
+правки.
+
+## Назначение репозитория
+
+`poh-demo-checkout` — маленький сервис расчёта стоимости заказа. Он существует
+не ради себя: на нём гоняется полный цикл контура производства — Issue →
+аналитика → разработка → PR → ревью. Код намеренно простой, чтобы предметом
+разбора был контур, а не предметная область.
+
+## Структура
+
+- `src/pricing.mjs` — вся арифметика. Чистые функции без ввода-вывода
+- `src/server.mjs` — тонкая HTTP-обёртка: разбор запроса и коды ответов
+- `tests/pricing.test.mjs` — тесты расчёта (`node:test`)
+
+Зависимостей нет — это свойство сервиса, а не упущение. Новая зависимость
+заводится, только если задачу нечем закрыть из стандартной библиотеки, и причина
+записывается рядом с кодом.
+
+## Проверки
+
+Та же команда, что гоняет CI (`.github/workflows/ci.yml`):
+
+```bash
+node --test "tests/*.test.mjs"
+```
+
+Новая логика — новый тест. Правка расчёта без теста на неё считается
+незавершённой: расчёт здесь единственное, что вообще может сломаться молча.
+
+## Как агент ведёт работу
+
+**MVP первым, edge-кейсы — в SubIssue.** Граница MVP — раздел **HowToDemo** в
+Issue. Пока HowToDemo не проходит, делается только то, что к нему ведёт.
+
+Найденный по дороге edge-кейс, риск или «надо бы потом учесть» **не чинится в
+текущей ветке** — он записывается в `.followups.md` в корне рабочего каталога,
+по одному разделу на находку:
+
+```markdown
+## Отрицательная цена позиции проходит в расчёт
+
+`subtotal` проверяет `price < 0` уже после умножения на `qty`
+(src/pricing.mjs:26). Всплывёт на импорте прайса из внешней системы.
+```
+
+SubIssue по находкам заводит контур: своим токеном, с меткой `origin:agent` и
+ключом цепочки `root-issue: #N` в теле, и сам оставляет ссылки комментарием в
+родителе. По этим двум признакам контур отличает свой выход от входа: Issue с
+`origin:agent` проходит сокращённый триаж, а follow-up, порождённый
+follow-up-ом, уходит человеку вместо второго круга. Без них каждый PR начинал бы
+рождать Issue, а каждый Issue — PR.
+
+Заводить их самому нечем и не нужно: `gh` и GITHUB_TOKEN агенту разработки не
+дают намеренно — он исполняет код репозитория, и токен рядом с этим кодом лишний.
+
+**Ветка и PR несут номер Issue.** Ветка — `feature/<N>-<slug>`, PR — `Closes #N`
+в теле. Это сквозной ключ: по нему Issue-Agent и PR-Agent собирают один таймлайн
+из двух сервисов.
+
+**Хронология непрерывна.** Значимый шаг — комментарий в Issue, а не только в
+логе прогона: следующий агент восстанавливает контекст чтением одного Issue.
+
+## Чего не делать
+
+- Чинить edge-кейс «раз уж он рядом» и расширять scope ветки находками, не
+  блокирующими HowToDemo.
+- Заводить зависимость ради того, что закрывается стандартной библиотекой.
+- Переписывать `src/server.mjs` арифметикой: расчёт живёт в `pricing.mjs` и
+  проверяется без сети. Логика в обёртке — логика, которую тест не увидит.
+</file>
+
+<file path="CLAUDE.md">
+# CLAUDE.md
+
+Гайд для Claude Code в этом репозитории. Он же демо-стенд контура производства —
+здесь ходят Issue-Agent, OpenHands и PR-Agent, поэтому конвенции жёстче обычного:
+на них держится автоматика.
+
+## Git-workflow (обязательно)
+
+**Правило:** любая доработка ведётся через Issue. Цель — прозрачная хронология:
+любой агент восстанавливает контекст, читая один Issue, без раскопок в чате.
+
+1. **Issue первым делом.** Запрос на доработку → перед любым кодом заводится
+   Issue. Без Issue работа не начинается.
+2. **HowToDemo в Issue.** Конкретный сценарий, которым проверяется готовность:
+   что запустить, что сделать, что должно получиться. Это граница MVP. Нет
+   HowToDemo — нет критерия «готово».
+3. **Ветка = Issue.** `feature/<номер>-<slug>` либо `fix/<номер>-<slug>`.
+4. **PR = Issue.** `Closes #<номер>` в теле.
+5. **Хронология непрерывна.** Значимый шаг — комментарий в Issue.
+
+## MVP первым, edge-кейсы — в SubIssue (обязательно)
+
+Найденный по дороге edge-кейс **не берётся в работу сразу** — он выносится
+SubIssue с `root-issue: #N` и меткой `origin:agent`. К нему возвращаются после
+того, как MVP прошёл HowToDemo.
+
+Агент разработки заводит их не сам: он пишет находки в `.followups.md` в корне
+рабочего каталога (раздел `## <кратко>` на находку), а SubIssue по ним создаёт
+контур своим токеном. Токена у агента нет намеренно — он исполняет код
+репозитория.
+
+Единственное исключение — edge-кейс, без которого HowToDemo не проходит. Тогда
+это часть MVP, и надо явно сказать, чем именно он ломает демо.
+
+**DON'T:** чинить edge-кейс «раз уж он рядом»; расширять scope ветки находками,
+не блокирующими HowToDemo; держать находки только в чате — не зафиксированные
+SubIssue теряются.
+
+## Метки контура
+
+Их пишет автоматика, и правило простое: **одна метка — один писатель**.
+
+| Метка | Пишет | Смысл |
+|---|---|---|
+| `advisor:*`, `priority:*`, `phase:*` | Issue-Agent | классификация, приоритет, фаза задачи |
+| `research-me`, `build-me` | человек | запуск дорогой стадии |
+| `ready-for-dev` | Issue-Agent | задача подготовлена, можно брать в работу |
+| `origin:agent` | любой агент | артефакт создан агентом, а не человеком |
+| `agents:off` | человек | рубильник: агенты не трогают этот Issue |
+
+Чужую метку агент только читает.
+
+## Проверки
+
+```bash
+node --test "tests/*.test.mjs"
+```
+
+Новая логика — новый тест. Расчёт здесь единственное, что может сломаться молча.
+
+## Границы кода
+
+- Арифметика — в `src/pricing.mjs`, чистыми функциями. `src/server.mjs` только
+  разбирает запрос и отдаёт коды: логика в обёртке — логика, которую тест не
+  увидит.
+- Зависимостей у сервиса нет. Новая заводится, только если задачу нечем закрыть
+  из стандартной библиотеки, и причина пишется рядом с кодом.
+</file>
+
+<file path="DEMO.md">
+# Демо контура производства
+
+Сквозной прогон на этом репозитории: заявка превращается в задачу, задача — в
+системные требования, требования — в код, код — в отревьюенный PR. Человек
+вмешивается ровно один раз.
+
+Стенд поднимается одной командой — `poh-infra/harness`. Как поднять локально и
+что прописать снаружи: [`harness/LOCAL.md`](https://github.com/po-helper-org/poh-infra/blob/main/harness/LOCAL.md).
+
+---
+
+## Прогон, на котором это проверено
+
+Не сценарий, а факт: задача [#1](https://github.com/po-helper-org/poh-demo-checkout/issues/1)
+прошла путь целиком 2026-08-18, без ручного вмешательства между шагами.
+
+| Что смотреть | Где |
+|---|---|
+| Триаж и фазы | метки на [#1](https://github.com/po-helper-org/poh-demo-checkout/issues/1): `advisor:feature-request` → `priority:P3` → `phase:pr-review` |
+| Аналитика | ветка `research/issue-1`, каталог `sa_documentation/FNR/FNR_1/` |
+| Разработка | [PR #6](https://github.com/po-helper-org/poh-demo-checkout/pull/6): три файла, тестов стало 15 вместо 8 |
+| Декомпозиция | [SubIssue #4](https://github.com/po-helper-org/poh-demo-checkout/issues/4) — агент нашёл edge-кейс, завёл отдельно и не стал чинить в той же ветке |
+| Ревью | комментарий `PR Reviewer Guide 🔍` на PR #6 |
+
+---
+
+## Две активности контура
+
+| | Research | Develop |
+|---|---|---|
+| Работает с | Issue, текстом, аналитиком | веткой, кодом, PR |
+| Цель | превратить запрос в описанный документ: БФТ → системные требования → декомпозиция | взять Issue и автономно разработать, протестировать, открыть PR, довести по ревью |
+| Кто исполняет | цепочка FNR через `claude -p` в воркере | OpenHands headless на раннере GitHub Actions |
+| Видно в | Temporal: `IssueAnalysis` | Actions: `OpenHands Resolver` |
+
+Между ними — точка передачи `ready-for-dev`: единственное место, где контур сам
+отдаёт работу человеку. `DEVELOP_AUTOSTART=1` эту паузу снимает.
+
+---
+
+## Сценарий
+
+### Акт 1. Заявка становится задачей
+
+1. **Claude Code заводит Issue** по минорной фиче.
+2. **Вебхук поднимает workflow** — в Temporal появляется `IssueLifecycle`
+   с id `issue-<owner/repo>-<N>`. Стадии видны по мере прохождения.
+3. **Триаж отрабатывает сам**: `advisor:*` (что это за запрос), `priority:*`
+   (по формуле, с разбором в комментарии), `phase:classified`. Дальше цикл
+   паркуется и ждёт решения человека.
+
+Смотреть: Issue в GitHub и `IssueLifecycle` в Temporal UI одновременно — метка
+`phase:*` и стадия workflow показывают одно и то же состояние двум разным людям.
+
+### Акт 2. Research
+
+4. **Команда `/analyze`** комментарием (либо метка `run:analyze`).
+5. **Запускается `IssueAnalysis`** — отдельный workflow, видно в Temporal.
+   Внутри цепочка FNR: `task → concept → debate → sysreq → validate`,
+   каждая стадия отдельной активностью.
+6. **Результат**: ветка `research/issue-<N>` с артефактами в
+   `sa_documentation/FNR/FNR_1/`, комментарий со сводкой, фаза
+   `phase:system-requirements`.
+7. **Передача разработчику**: метка `ready-for-dev` и чеклист готовности —
+   что известно, с чего начать и **что осталось неопределённым** (строки
+   `[УТОЧНИТЬ]` вычитываются из самих артефактов).
+
+### Акт 3. Develop
+
+8. **Разработка стартует сама** (`DEVELOP_AUTOSTART=1`): активность Develop
+   диспатчит `openhands-resolver.yml` и паркует цикл в фазе `in-development`.
+9. **OpenHands работает на раннере**: читает Issue + системные требования +
+   `AGENTS.md`, пишет код, гоняет тесты.
+10. **Edge-кейсы уходят в SubIssue** — с `root-issue: #N` и меткой
+    `origin:agent`. В текущей ветке они не чинятся.
+11. **На каждый SubIssue поднимается свой `IssueLifecycle`** и проходит
+    сокращённый триаж: он уже классифицирован создателем, поэтому только дедуп
+    и приоритет.
+12. **PR открыт** с `Closes #N`; прогон докладывает событие `pr-open`, и фаза
+    задачи двигается сама.
+
+### Акт 4. Ревью
+
+13. **PR-Agent ревьюит** сразу после открытия PR — вызовом из того же прогона,
+    комментарий `PR Reviewer Guide 🔍`.
+14. **Claude Code вносит правки** и пишет `/review`.
+15. **Ревью перезапускается** и переписывает тот же комментарий на месте.
+    Замечание пропало — закрыто.
+16. **Задача готова к merge** и ждёт живого разработчика.
+
+---
+
+## Что показать в Temporal
+
+Одна лента на всю цепочку: `IssueLifecycle` живёт от заведения задачи до
+влитого PR, а дорогие стадии — `IssueAnalysis`, `IssueEstimation` — дочерние
+прогоны под ним. Ожидание человека и ожидание внешнего агента — это не пауза в
+коде, а состояние с дедлайном: задача, о которой забыли, эскалируется сама.
+
+## Границы, о которых честно сказать
+
+- **Код пишет OpenHands, а не контур.** Он живёт на раннере GitHub Actions:
+  своё окружение, свой sandboxing, свой счёт минут. Контур его запускает и
+  слушает доклад.
+- **Ревью не чек-лист «исправлено/нет».** `/review` заново ревьюит текущий
+  диф, а не сравнивает с прошлым прогоном. Пропало замечание — исправлено.
+- **Merge остаётся за человеком.** Контур доводит до состояния «готово к
+  слиянию» и останавливается.
+</file>
+
+<file path="package.json">
+{
+  "name": "poh-demo-checkout",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Демо-стенд контура производства: расчёт стоимости заказа",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test \"tests/*.test.mjs\""
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
+</file>
+
+<file path="README.md">
+# poh-demo-checkout
+
+Маленький сервис расчёта стоимости заказа. Существует не ради себя: это
+**демо-стенд контура производства** — на нём гоняется полный цикл от заявки до
+влитого PR, и код намеренно простой, чтобы предметом разбора был контур, а не
+предметная область.
+
+```
+Issue заведён
+  └─ Issue-Agent: триаж (advisor:* + priority:* + phase:classified)
+       └─ аналитика FNR → ветка research/issue-N + системные требования
+            ├─ остались вопросы [УТОЧНИТЬ] → комментарий и ожидание ответа
+            └─ декомпозиция → SubIssue по релизам MVP / GROW / SUPPORT
+                 └─ ready-for-dev + чеклист готовности
+                      └─ OpenHands: разработка → PR с Closes #N
+                           ├─ edge-кейсы по дороге → .followups.md → SubIssue
+                           └─ PR-Agent: ревью
+                                └─ круг правок → /review → «замечаний нет»
+```
+
+Подзадачи декомпозиции своей разработки НЕ заводят: весь объём MVP исполняет
+родитель одним прогоном и одним PR. Иначе на репозитории одновременно работали бы
+несколько агентов.
+
+## Сервис
+
+Сервис предоставляет HTTP-интерфейс для расчёта стоимости заказа с поддержкой
+промокодов, способов оплаты и метрик.
+
+### Маршруты API
+
+| Метод | Путь | Назначение | Коды ответов | Пример тела запроса | Пример тела ответа |
+|---|---|---|---|---|---|
+| GET | `/healthz` | Проверка здоровья сервиса | 200, 405 | — | `{"status":"ok","uptime_sec":123}` |
+| GET | `/stats` | Получение статистики сервиса | 200 | — | `{"requests":42,"errors":1,"lastError":"..."}` |
+| POST | `/quote` | Расчёт стоимости заказа | 200, 400, 404, 415 | См. ниже | См. ниже |
+
+#### POST /quote
+
+**Пример тела запроса (минимальный):**
+```json
+{
+  "items": [
+    {
+      "sku": "a",
+      "price": 1000,
+      "qty": 2
+    }
+  ]
+}
+```
+
+**Пример тела запроса (полный):**
+```json
+{
+  "items": [
+    {
+      "sku": "a",
+      "price": 1000,
+      "qty": 2
+    }
+  ],
+  "promoCode": "WELCOME10",
+  "paymentMethod": "cloudpayments",
+  "invoiceSeq": 1
+}
+```
+
+**Пример успешного ответа:**
+```json
+{
+  "goods": 2000,
+  "delivery": 300,
+  "discount": 200,
+  "promoStatus": "applied",
+  "total": 2100,
+  "payment": {
+    "provider": "cloudpayments",
+    "amount": 2100,
+    "currency": "RUB",
+    "invoiceId": "INV-A1B2C3D4-1"
+  },
+  "paymentStatus": "ready"
+}
+```
+
+**Ошибки валидации:**
+- `{"error": "заказ без позиций"}` — пустой массив `items`
+- `{"error": "некорректная цена в позиции X"}` — `price` не число или < 0
+- `{"error": "некорректное количество в позиции X"}` — `qty` не целое или <= 0
+- `{"error": "минимальная сумма заказа 1000, не хватает X"}` — сумма товаров < 1000
+- `{"error": "неизвестный способ оплаты: X"}` — неподдерживаемый `paymentMethod`
+
+Доставка бесплатна от 3000 (включительно). Зависимостей у сервиса нет — это его
+свойство, а не упущение.
+
+### Ограничения метрик
+
+Маршрут `GET /stats` возвращает счётчики посещений (`visits`) и успешных транзакций
+(`successes`). **Важно:** счётчики хранятся в памяти процесса и сбрасываются при
+перезапуске сервиса. Это осознанное архитектурное решение демо-сервиса: отсутствие
+персистентности упрощает код и позволяет сосредоточиться на контуре производства,
+а не на хранении данных. На графиках метрики будут обнуляться после каждого
+перезапуска — это свойство архитектуры, а не ошибка или потеря данных.
+
+### Расхождения между README и кодом
+
+- **Текущий README** описывает только простой случай без промокодов и оплаты,
+  но **код** поддерживает: промокоды (`promoCode`/`promo`), способы оплаты
+  (`paymentMethod`), генерацию `invoiceId`, поле `invoiceSeq` для retry-логики
+- **Код** возвращает больше полей, чем показано в README: `discount`, `promoStatus`,
+  `payment`, `paymentStatus` — текущий пример ответа (`{"goods":2000,"delivery":300,"total":2300}`)
+  соответствует только базовому случаю без промокодов и оплаты
+- **Код** включает дополнительный маршрут `GET /stats` для статистики, которого нет
+  в README
+- **Код** валидирует `Content-Type` и возвращает 415 при неверном заголовке, но README
+  не документирует это поведение
+- **Код** поддерживает минимальную сумму заказа (1000 руб.) с ошибкой валидации,
+  но README упоминает только порог бесплатной доставки
+- **Код** использует параметр `promo` для обратной совместимости наряду с `promoCode`,
+  что не отражено в README
+
+## Проверки
+
+```bash
+node --test "tests/*.test.mjs"
+```
+
+## Автоматика
+
+| Workflow | Когда | Что делает |
+|---|---|---|
+| `ci.yml` | PR и push в main | тесты |
+| `openhands-resolver.yml` | диспатч от Issue-Agent (либо метка `fix-me`) | разработка по Issue → PR |
+| `pr-review.yml` | три входа: вызов из разработки, событие `pull_request`, команда `/review` в PR | ревью PR-Agent + доклад в цикл |
+
+Три входа у ревью не для надёжности, а по необходимости. PR, созданный
+`GITHUB_TOKEN`, событий workflow не порождает — оттуда вызов из разработки. PR,
+открытый контуром на своём сервере (режим `local`), Actions вообще не проходит —
+оттуда `pull_request`. Перепроверку после круга правок просит сам контур командой
+`/review`, и пишет он её токеном GitHub App, то есть ботом: фильтра по типу автора
+на этой команде нет намеренно.
+
+`pr-review.yml` определяет исход **по выводу** `pr-agent`, а не по коду возврата:
+на rate-limit модели тот пишет `Failed to review PR` в лог, оставляет в PR
+заглушку «Preparing review...» и завершается успешно. Доклад в цикл несёт
+`headRefOid` — коммит, по которому шло ревью: без него круги правок выглядели
+повторной доставкой одного и того же факта, и второй круг не начинался.
+
+Правила, по которым работают агенты, — в [`AGENTS.md`](AGENTS.md) и
+[`CLAUDE.md`](CLAUDE.md). Конфигурация контура целиком — `poh-infra/harness`.
+</file>
+
+</files>

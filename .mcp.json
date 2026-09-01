@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "repowise": {
+      "type": "http",
+      "url": "http://repowise-proxy:7400/mcp?workspace=product&session=rw-analysis-po-helper-org__poh-demo-checkout-165",
+      "headers": {
+        "Authorization": "Bearer c8f28c03c41ed97f945d857fb10ee2ab67906dd8c69efa60"
+      }
+    }
+  }
+}
