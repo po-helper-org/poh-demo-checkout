@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { app } from '../src/server.mjs';
 import { counters } from '../src/metrics.mjs';
+
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
  * Вспомогательная функция для HTTP-запросов к app().
@@ -363,4 +368,36 @@ test('POST /quote продолжает работать как раньше', as
   assert.equal(res.body.goods, 1000);
   assert.equal(res.body.delivery, 300);
   assert.equal(res.body.total, 1300);
+});
+
+// === Раздача статики: проверка вложенности ===
+
+test('GET /../static-<сосед>/keys.json возвращает 404 и не отдаёт содержимое', async (t) => {
+  // Сосед каталога статики, имя которого начинается с "static": голый
+  // startsWith('/…/static') считал такой путь вложенным и отдавал файл.
+  const secretDir = mkdtempSync(join(REPO_ROOT, 'static-test-secret-'));
+  t.after(() => rmSync(secretDir, { recursive: true, force: true }));
+  writeFileSync(join(secretDir, 'keys.json'), 'секрет');
+
+  const res = await request(`/../${basename(secretDir)}/keys.json`);
+
+  assert.equal(res.statusCode, 404);
+  assert.deepEqual(res.body, { error: 'не найдено' });
+});
+
+test('GET /../src/server.mjs возвращает 404 — исходник не отдаётся', async () => {
+  const res = await request('/../src/server.mjs');
+  assert.equal(res.statusCode, 404);
+});
+
+test('GET /style.css отдаётся как статика — 200', async () => {
+  const res = await request('/style.css');
+  assert.equal(res.statusCode, 200);
+  assert.match(res.headers['content-type'], /text\/css/);
+});
+
+test('GET / отдаёт index.html — 200', async () => {
+  const res = await request('/');
+  assert.equal(res.statusCode, 200);
+  assert.match(res.headers['content-type'], /text\/html/);
 });

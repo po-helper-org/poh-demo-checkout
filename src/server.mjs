@@ -61,12 +61,15 @@ function serveStatic(url) {
   try {
     // Security: resolve the canonical path first before any file system operations
     const realPath = realpathSync(filePath);
-    
-    // Security check: ensure the resolved path is within STATIC_DIR
+
+    // Security check: ensure the resolved path is within STATIC_DIR.
+    // Граница пути, а не префикс строки: '/app/static-secret' начинается
+    // с '/app/static' посимвольно, но вложенным каталогом не является.
     const normalizedStatic = STATIC_DIR.replace(/\\/g, '/');
     const normalizedFile = realPath.replace(/\\/g, '/');
-    
-    if (!normalizedFile.startsWith(normalizedStatic)) {
+
+    if (normalizedFile !== normalizedStatic &&
+        !normalizedFile.startsWith(`${normalizedStatic}/`)) {
       return null;
     }
     
