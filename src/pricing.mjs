@@ -91,10 +91,12 @@ function validatePromoCode(code, now = new Date()) {
  * Возвращает 0 для неизвестного промо-кода.
  * @param {number} goods
  * @param {string|null} promoCode
+ * @param {Date} now — момент расчёта; параметр нужен тестам, чтобы срок
+ *   действия промокода не зависел от календаря машины, на которой их гоняют.
  */
-export function discountAmount(goods, promoCode) {
+export function discountAmount(goods, promoCode, now = new Date()) {
   if (!promoCode) return 0;
-  const discount = validatePromoCode(promoCode);
+  const discount = validatePromoCode(promoCode, now);
   if (discount === null) {
     return 0;
   }
@@ -124,8 +126,10 @@ function generateInvoiceId(items, promoCode, seq = 1) {
  * @param {string|null} promoCode — опциональный промокод
  * @param {string|null} paymentMethod — опциональный способ оплаты
  * @param {number} invoiceSeq — номер попытки оплаты (для уникальности invoiceId)
+ * @param {Date} now — момент расчёта; см. `discountAmount`.
  */
-export function quote(items, promoCode = null, paymentMethod = null, invoiceSeq = 1) {
+export function quote(items, promoCode = null, paymentMethod = null, invoiceSeq = 1,
+                      now = new Date()) {
   const goods = subtotal(items);
   if (goods < MIN_ORDER_AMOUNT) {
     throw new Error(`минимальная сумма заказа ${MIN_ORDER_AMOUNT}, не хватает ${MIN_ORDER_AMOUNT - goods}`);
@@ -136,7 +140,7 @@ export function quote(items, promoCode = null, paymentMethod = null, invoiceSeq 
   let promoStatus = 'none';
 
   if (promoCode) {
-    const discountValue = validatePromoCode(promoCode);
+    const discountValue = validatePromoCode(promoCode, now);
     if (discountValue !== null) {
       // Скидка только на товары, доставка не скидывается
       // Округление до 2 знаков после запятой для избежания ошибок плавающей точки
