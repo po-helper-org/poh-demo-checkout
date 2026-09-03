@@ -216,6 +216,35 @@ test('DELETE /stats возвращает 405 с заголовком Allow: GET'
   assert.equal(res.headers['Allow'], 'GET');
 });
 
+// === HEAD на /healthz и /stats (Issue #171) ===
+
+test('HEAD /healthz возвращает 200 с заголовками GET и пустым телом', async () => {
+  const getRes = await request('/healthz', 'GET');
+  const res = await request('/healthz', 'HEAD');
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.headers['content-type'], getRes.headers['content-type']);
+  assert.ok(Number(res.headers['content-length']) > 0);
+  assert.equal(res.body, '');
+});
+
+test('HEAD /stats возвращает 200 с теми же заголовками, что GET, и пустым телом', async () => {
+  const getRes = await request('/stats', 'GET');
+  const res = await request('/stats', 'HEAD');
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.headers['content-type'], getRes.headers['content-type']);
+  assert.equal(res.headers['content-length'], getRes.headers['content-length']);
+  assert.equal(res.body, '');
+});
+
+test('HEAD /healthz не инкрементирует visits', async () => {
+  const before = counters.getStats().visits;
+  await request('/healthz', 'HEAD');
+  const after = counters.getStats().visits;
+  assert.equal(after, before);
+});
+
 // === Тесты валидации Content-Type ===
 
 test('POST /quote с Content-Type application/json возвращает 200', async () => {

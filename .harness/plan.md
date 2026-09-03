@@ -1,306 +1,426 @@
-# Issue #163: 405 с `Allow: POST` на не-POST `/quote` — Implementation Plan
+# HEAD на `/healthz` и `/stats` — Implementation Plan (Issue #171)
 
-> **For agentic workers:** план исполняется неинтерактивно, задача за задачей,
-> по порядку. Шаги помечены чекбоксами (`- [ ]`). Спрашивать некого: если шаг
-> нельзя выполнить буквально — принять минимальное решение в духе репозитория и
-> записать его в `.reflect.md`, не расширяя дифф.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+>
+> Прогон неинтерактивный: вопросов некому — сомнения фиксируются в `.reflect.md`
+> (задача 3), а не диалогом. План только читается, шаги исполняются по порядку.
 
-**Goal:** `GET /quote` (и любой метод, кроме `POST`) отвечает `405 Method Not
-Allowed` с заголовком `Allow: POST` и телом `{"error":"Method Not Allowed"}` —
-вместо нынешнего `404 {"error":"не найдено"}`. `POST /quote` работает как
-раньше.
+**Goal:** `HEAD /healthz` и `HEAD /stats` отвечают `200` с теми же заголовками,
+что и `GET`, и пустым телом (сейчас оба попадают в ветку `405`).
 
-**Architecture:** один guard в HTTP-обёртке `src/server.mjs`, по образцу уже
-существующих проверок `/healthz` (строки 107–115) и `/stats` (117–122): путь
-совпал, метод не тот → `405` + `Allow`. Guard ставится **до** POST-ветки и
-**до** раздачи статики, чтобы запрос перестал проваливаться в `serveStatic` и
-падать в общий `404` (строка 168). Расчёт (`src/pricing.mjs`) и метрики не
-трогаются.
+**Architecture:** правка только в HTTP-обёртке `src/server.mjs`: guard двух
+маршрутов пропускает `HEAD` наряду с `GET`, а `send()` получает флаг `omitBody`,
+который пишет заголовки от полного ответа, но не пишет само тело. Арифметика
+(`src/pricing.mjs`) не затрагивается — здесь её нет вовсе.
 
-**Tech Stack:** Node.js >= 22, только stdlib — `node:http`, `node:test`,
-`node:assert/strict`. Зависимостей у сервиса нет и не появляется.
-
-## Как собран этот план
-
-`.harness/` на этом прогоне содержит только `context.md` — ни `requirements.md`,
-ни `howtodemo.md` не собрались. Граница MVP взята из тела Issue (`.task.md`):
-curl-сценарий «было/должно работать» + «`POST /quote` продолжает работать как
-раньше» + правило репозитория «новая логика — новый тест».
+**Tech Stack:** Node.js 22, `node:http`, `node:test` + `node:assert/strict`.
+Зависимостей у сервиса нет и не появляется.
 
 ## Global Constraints
 
-- Тесты гонять той же командой, что и CI (`.github/workflows/ci.yml`):
-  `node --test "tests/*.test.mjs"`. Красный прогон в PR не отдаём.
-- Новая логика — новый тест; правка без теста в этом репозитории считается
-  незавершённой.
-- Зависимостей нет: задачу закрываем из stdlib, новых пакетов не заводим.
-- `src/server.mjs` остаётся тонкой обёрткой — только разбор запроса и коды
-  ответов. `src/pricing.mjs` не меняется вообще.
-- Ответ на не-POST `/quote` дословно: статус `405`, заголовок `Allow: POST`,
-  тело `{"error":"Method Not Allowed"}` — тот же формат, что у `/healthz` и
-  `/stats`.
-- `405` по `/quote` **не** инкрементирует `visits`/`successes` — как и `405`
-  у `/healthz` и `/stats`.
-- Границы Issue: меняется поведение только `/quote` и только для методов,
-  отличных от `POST`. Раздача статики, расчёт и остальные эндпоинты — без
-  изменений; условие POST-ветки (`pathname === '/quote' && req.method ===
-  'POST'`) не «упрощать» — минимальный дифф.
-- Коммит, пуш и PR делает workflow после агента. В плане нет `git commit` /
-  `git push`; рабочее дерево остаётся с правками.
-- Ветка по конвенции репозитория: `fix/163-quote-405-allow-post`.
-- Edge-кейсы, найденные по дороге, в эту ветку не брать — записывать в
-  `.followups.md` в корне рабочего каталога (раздел `## <кратко>` на находку).
+- **Git не трогаем.** Коммит, пуш и PR делает workflow после прогона
+  (`.task.md` «Как работать» п. 4). Шагов `git commit` в плане нет; результат —
+  рабочее дерево в нужном состоянии.
+- **Проверка та же, что в CI:** `node --test "tests/*.test.mjs"`. Красный прогон
+  в PR не отдаём — failing-тесты и правка уходят вместе, в одной задаче.
+- **Новая логика — новый тест.** Правка без теста на неё считается
+  незавершённой (`.task.md` п. 3, `CLAUDE.md` «Проверки»).
+- **Арифметика — в `src/pricing.mjs` чистыми функциями;** `src/server.mjs` только
+  разбирает запрос и отдаёт коды. Эта задача не добавляет расчётов.
+- **Зависимости не заводить** — всё нужною закрывается `node:http` и
+  глобальным `fetch`.
+- **MVP-граница = `.harness/howtodemo.md`:** «было — запросы `HEAD /healthz` и
+  `HEAD /stats` возвращают код 405; стало — оба возвращают код 200 с теми же
+  заголовками, что и GET, и с пустым телом».
+- **Комментарии и имена тестов — на русском,** как во всём репозитории.
+- **Индекс `repowise` (MCP) до первой правки** — обязательный шаг `.task.md`:
+  минимум один вопрос про компоненты, которые меняются. Если вызов вернул
+  ошибку — работаем без индекса, это штатный режим. В этой сессии планирования
+  инструмента `repowise` не было, поэтому запрос остаётся за исполнителем.
+
+## Источники
+
+- `.harness/context.md` → называет только `howtodemo.md`. `requirements.md` не
+  собрался — работаем от тела Issue (`.task.md`), это штатный путь.
+- `.task.md` — постановка, включая curl-проверку и правила прогона.
+- `src/server.mjs` — ветки `/healthz` (строки 107–115) и `/stats` (117–122) с
+  guard-ом `req.method !== 'GET'` → 405; `send()` (29–37) пишет тело всегда.
+- `tests/server.test.mjs` — mock-хелпер `request(url, method, body,
+  customHeaders)`, возвращающий `{statusCode, headers, body}`; там же живут
+  тесты на 405 у всех прочих методов.
+- `tests/healthz.test.mjs` — единственное место, где `app` гоняется через
+  настоящий `createServer`.
+- `README.md` — таблица маршрутов (только `GET`), раздел «Расхождения между
+  README и кодом».
+
+## Что именно меняется (суть)
+
+1. Guard: `req.method !== 'GET'` → `req.method !== 'GET' && req.method !== 'HEAD'`
+   в `/healthz` и `/stats`. `Allow: GET` в 405-ответе **не меняется** — см.
+   «Вне MVP».
+2. Тело: `send()` получает пятый параметр `omitBody`. Заголовки считаются от
+   полного ответа (`content-length` остаётся длиной тела GET — на неё и опирается
+   мониторинг), а `res.end()` вызывается без payload. Явное подавление нужно
+   потому, что mock-обёртка тестов записывает в `body` всё, что ушло в
+   `res.end()`, и assertion «тело пустое» иначе проверить нельзя; relying on
+   транспорт («реальный Node сам срежет тело HEAD-ответа») — это логика, которой
+   в коде не видно, а `CLAUDE.md` прямо просит не прятать логику в обёртке.
 
 ---
 
-### Task 0: Спросить индекс repowise до первой правки
+### Task 1: HEAD на `/healthz` и `/stats` — guard и пустое тело
 
 **Files:**
-- Create: ничего (диалог с индексом публикуется артефактом автоматически)
+- Modify: `src/server.mjs` (функция `send`, строки 29–37; `app`, строки 103–122)
+- Modify: `tests/server.test.mjs` (вставка после теста `DELETE /stats…`, строка 217)
+- Modify: `README.md` (строка после таблицы маршрутов, после строки 36)
 
 **Interfaces:**
-- Consumes: пусто — задача независима, это обязательный прегрев перед правками.
-- Produces: ответы индекса по компонентам `/quote` и раздаче статики; ними
-  пользуется Task 1 при формулировке тестов и Task 2 при выборе места guard-а.
+- Consumes: mock-хелпер `request(url, method = 'GET', body = null,
+  customHeaders = {})` из `tests/server.test.mjs` — уже есть, возвращает
+  `{statusCode, headers, body}`; для HEAD вызывается как
+  `request('/healthz', 'HEAD')`. Функция `send(res, code, body, extraHeaders = {})`
+  из `src/server.mjs` — уже есть, расширяем её сигнатуру.
+- Produces: `send(res, code, body, extraHeaders = {}, omitBody = false)` — при
+  `omitBody: true` заголовки пишутся от полного ответа, тело не пишется;
+  маршруты `/healthz` и `/stats` отвечают `200` на `GET` и `HEAD` (HEAD — с
+  пустым телом) и `405` c `Allow: GET` на все прочие методы. Больше никто из
+  задач этот интерфейс не использует — остальные `send(...)` в файле остаются
+  с четырьмя аргументами и дефолтным `omitBody: false`.
 
-- [ ] **Step 1: Задать индексу вопрос о компонентах, которые собираемся менять**
+- [ ] **Шаг 1: спросить индекс `repowise` (если он доступен), до правок**
 
-До чтения файлов по существу и до первой правки — не меньше одного вопроса к
-MCP-серверу `repowise` (`search_codebase`, `get_context`, `get_symbol` или
-`get_answer`) про `app` в `src/server.mjs`: кто ещё вызывает этот обработчик,
-как устроена раздача статики и почему `/quote` объявлен только под `POST`.
-Если индекс недоступен (вызов вернул ошибку) — работать без него, это штатный
-режим; пропускать шаг «потому что задача простая» нельзя.
+  Вопросы: кто, кроме `/healthz` и `/stats`, читает `send()` из
+  `src/server.mjs`; почему guard у этих маршрутов устроен через
+  `req.method !== 'GET'`, а не через белый список (история и решение —
+  `get_why`/`get_risk`). Ошибка вызова → идём дальше без индекса.
 
----
+- [ ] **Шаг 2: написать failing-тесты (mock-уровень)**
 
-### Task 1: Красные тесты на 405 для не-POST `/quote`
+  Вставить в `tests/server.test.mjs` сразу после теста
+  `DELETE /stats возвращает 405…`:
 
-**Files:**
-- Modify: `tests/server.test.mjs` (дописать в конец файла, после тестов
-  «Тесты валидации Content-Type», с шапкой-разделителем в стиле существующих)
-- Test: `tests/server.test.mjs`
+  ```js
+  // === HEAD на /healthz и /stats (Issue #171) ===
 
-**Interfaces:**
-- Consumes: пусто — тесты от предыдущих задач не зависят. Используют уже
-  существующие в этом файле импорты и хелпер: `request(url, method, body,
-  customHeaders)` (строки 15–81) и синглтон `counters` из `src/metrics.mjs`.
-- Produces: пять тестов, фиксирующих контракт не-POST `/quote` — статус `405`,
-  заголовок `Allow: POST`, тело `{"error":"Method Not Allowed"}`, `visits` не
-  растёт, `POST /quote` остаётся `200`. Task 2 принимает их как спецификацию.
+  test('HEAD /healthz возвращает 200 с заголовками GET и пустым телом', async () => {
+    const getRes = await request('/healthz', 'GET');
+    const res = await request('/healthz', 'HEAD');
 
-- [ ] **Step 1: Дописать тесты в конец `tests/server.test.mjs`**
-
-```js
-
-// === Метод, отличный от POST, на /quote ===
-
-test('GET /quote возвращает 405 с заголовком Allow: POST', async () => {
-  const res = await request('/quote', 'GET');
-  assert.equal(res.statusCode, 405);
-  assert.equal(res.body.error, 'Method Not Allowed');
-  assert.equal(res.headers['Allow'], 'POST');
-});
-
-test('PUT /quote возвращает 405 с заголовком Allow: POST', async () => {
-  const res = await request('/quote', 'PUT');
-  assert.equal(res.statusCode, 405);
-  assert.equal(res.body.error, 'Method Not Allowed');
-  assert.equal(res.headers['Allow'], 'POST');
-});
-
-test('DELETE /quote возвращает 405 с заголовком Allow: POST', async () => {
-  const res = await request('/quote', 'DELETE');
-  assert.equal(res.statusCode, 405);
-  assert.equal(res.body.error, 'Method Not Allowed');
-  assert.equal(res.headers['Allow'], 'POST');
-});
-
-test('GET /quote не инкрементирует visits', async () => {
-  const before = counters.getStats().visits;
-  await request('/quote', 'GET');
-  const after = counters.getStats().visits;
-  assert.equal(after, before);
-});
-
-test('POST /quote продолжает работать как раньше', async () => {
-  const res = await request('/quote', 'POST', {
-    items: [{ sku: 'a', price: 1000, qty: 1 }],
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.headers['content-type'], getRes.headers['content-type']);
+    assert.ok(Number(res.headers['content-length']) > 0);
+    assert.equal(res.body, '');
   });
-  assert.equal(res.statusCode, 200);
-  assert.equal(res.body.goods, 1000);
-  assert.equal(res.body.delivery, 300);
-  assert.equal(res.body.total, 1300);
-});
-```
 
-Трио `GET`/`PUT`/`DELETE` повторяет форму уже существующих тестов на `405`
-для `/healthz` и `/stats` (там оно зеркальное — `POST`/`PUT`/`DELETE` против
-GET-only эндпоинта). Тесты на `visits` и на `POST` — регрессионные: они
-проходят и до правки, они фиксируют то, что Issue требует не сломать.
+  test('HEAD /stats возвращает 200 с теми же заголовками, что GET, и пустым телом', async () => {
+    const getRes = await request('/stats', 'GET');
+    const res = await request('/stats', 'HEAD');
 
-- [ ] **Step 2: Прогнать файл и убедиться, что новые тесты красные**
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.headers['content-type'], getRes.headers['content-type']);
+    assert.equal(res.headers['content-length'], getRes.headers['content-length']);
+    assert.equal(res.body, '');
+  });
 
-Run: `node --test tests/server.test.mjs`
-Expected: FAIL — ровно три новых теста падают (`GET`/`PUT`/`DELETE /quote`) на
-первом ассерте с сообщением вида
-`Expected values to be strictly equal: 404 !== 405`. Два регрессионных теста
-(`visits`, `POST /quote`) зелёные и до правки. Остальные тесты файла зелёные.
+  test('HEAD /healthz не инкрементирует visits', async () => {
+    const before = counters.getStats().visits;
+    await request('/healthz', 'HEAD');
+    const after = counters.getStats().visits;
+    assert.equal(after, before);
+  });
+  ```
 
-- [ ] **Step 3: Зафиксировать красный прогон как точку отсчёта**
+  Почему у `/stats` сравнивается `content-length` один в один, а у `/healthz`
+  только «больше нуля»: тело `/healthz` содержит `uptime_sec`, и точное сравнение
+  двух ответов, разнесённых по времени, рассыпалось бы на границе разряда
+  (9 → 10 секунд). `/stats` между двумя соседними вызовами не меняется — там
+  сравнение точное и детерминированное.
 
-Ничего не править в `src/`. Если упало что-то, кроме трёх названных тестов, —
-остановиться и разобраться, а не идти дальше: значит, тест написан не так, как
-думалось.
+  Пустое тело mock показывает как `''`: `request()` пробует `JSON.parse('')`,
+  падает и возвращает строку как есть.
 
----
+- [ ] **Шаг 3: убедиться, что тесты красные**
 
-### Task 2: Guard `405` в `src/server.mjs`
+  Run: `node --test tests/server.test.mjs`
+  Expected: FAIL — три новых теста, в каждом `actual: 405`, `expected: 200`
+  (HEAD пока попадает в guard). Остальные тесты файла зелёные.
 
-**Files:**
-- Modify: `src/server.mjs:124` — вставить guard между блоком `/stats`
-  (заканчивается строкой 122) и POST-веткой `/quote` (строка 124)
-- Test: `tests/server.test.mjs`
+- [ ] **Шаг 4: минимальная правка `src/server.mjs`**
 
-**Interfaces:**
-- Consumes: контракт из Task 1 (`405` + `Allow: POST` +
-  `{"error":"Method Not Allowed"}`, метрики не трогаем). Внутри файла
-  использует уже существующие `pathname` (строка 105) и `send(res, code, body,
-  extraHeaders)` (строки 29–37) — новых функций не заводить.
-- Produces: поведение `/quote` — любой метод, кроме `POST`, получает `405` до
-  того, как дойдёт до раздачи статики; POST-ветка (строки 124–158) и
-  раздача статики (строки 160–166) не изменены. Task 3 принимает это как
-  готовое поведение для HowToDemo.
+  4.1. Заменить `send` целиком:
 
-- [ ] **Step 1: Вставить guard перед POST-веткой `/quote`**
-
-Между строкой 123 (пустая) и строкой 124:
-
-```js
-  // Не POST на /quote — 405 с Allow, как у /healthz и /stats: без guard-а
-  // запрос проваливается в раздачу статики и отвечает 404 про файл.
-  if (pathname === '/quote' && req.method !== 'POST') {
-    return send(res, 405, { error: 'Method Not Allowed' }, { 'Allow': 'POST' });
+  ```js
+  function send(res, code, body, extraHeaders = {}, omitBody = false) {
+    const payload = JSON.stringify(body);
+    res.writeHead(code, {
+      'content-type': 'application/json; charset=utf-8',
+      'content-length': Buffer.byteLength(payload),
+      ...extraHeaders
+    });
+    // HEAD отвечает теми же заголовками, что и GET, но без тела
+    // (RFC 9110 §9.3.2): content-length остаётся длиной полного ответа —
+    // по нему мониторинг и сравнивает живой сервис.
+    res.end(omitBody ? undefined : payload);
   }
-```
+  ```
 
-Guard стоит **до** POST-ветки и **до** `if (req.method === 'GET')` со статикой,
-поэтому: не-POST до статики не доходит, а POST-ветка не меняет ни строки.
-Счётчики `counters.incVisit()` / `incSuccess()` остаются внутри POST-ветки,
-так что `405` метрики не двигает.
+  4.2. В начале `app`, сразу после `const pathname = url.pathname;`:
 
-- [ ] **Step 2: Прогнать весь набор тестов**
+  ```js
+    // HEAD — это GET без тела: так живость проверяют балансировщики и мониторинг.
+    const omitBody = req.method === 'HEAD';
+  ```
 
-Run: `node --test "tests/*.test.mjs"`
-Expected: PASS — все тесты всех четырёх файлов, включая пять новых и все
-старые (`/healthz`, `/stats`, Content-Type, 413, метрики, расчёт в
-`pricing.test.mjs`).
+  4.3. Маршрут `/healthz` целиком:
 
-- [ ] **Step 3: Прогнать HowToDemo из Issue на живом сервере**
+  ```js
+    if (pathname === '/healthz') {
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        return send(res, 405, { error: 'Method Not Allowed' }, { 'Allow': 'GET' });
+      }
+      return send(res, 200, {
+        status: 'ok',
+        uptime_sec: Math.floor(process.uptime())
+      }, {}, omitBody);
+    }
+  ```
 
-```bash
-PORT=8080 node src/server.mjs &
-sleep 1
+  4.4. Маршрут `/stats` целиком:
 
-# 1. Главное из Issue: не-POST на /quote — 405 с Allow: POST
-curl -i http://localhost:8080/quote
-#   HTTP/1.1 405 Method Not Allowed
-#   Allow: POST
-#   {"error":"Method Not Allowed"}
+  ```js
+    if (pathname === '/stats') {
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        return send(res, 405, { error: 'Method Not Allowed' }, { 'Allow': 'GET' });
+      }
+      return send(res, 200, counters.getStats(), {}, omitBody);
+    }
+  ```
 
-# 2. POST /quote продолжает работать: расчёт не меняется
-curl -i -X POST http://localhost:8080/quote \
-  -H 'content-type: application/json' \
-  -d '{"items":[{"sku":"a","price":1000,"qty":2}]}'
-#   HTTP/1.1 200 … {"goods":2000,"delivery":300,"total":2300,...}
+  Больше в файле ничего не менять: `/quote`, статика и финальный `404` остаются
+  как есть (см. «Вне MVP»).
 
-# 3. Статика не тронута
-curl -i http://localhost:8080/
-#   HTTP/1.1 200 … text/html
+- [ ] **Шаг 5: убедиться, что тесты зелёные**
 
-# 4. Соседние эндпоинты не тронуты
-curl -i http://localhost:8080/healthz          # 200 {"status":"ok",...}
-curl -i -X POST http://localhost:8080/healthz  # 405, Allow: GET
-curl -i http://localhost:8080/stats            # 200
+  Run: `node --test tests/server.test.mjs`
+  Expected: PASS, включая существующие `POST/PUT/DELETE /healthz` и
+  `POST/PUT/DELETE /stats` → `405` c `Allow: GET` (их ассерты не правим).
 
-kill %1
-```
+- [ ] **Шаг 6: одна строка в README, чтобы не наращивать дрейф**
 
-Expected: все пять проверок совпадают с комментариями. Любое расхождение —
-назад к Step 1, без расширения диффа.
+  Сразу после таблицы маршрутов в `README.md` (после строки с `POST /quote`)
+  добавить:
 
-- [ ] **Step 4: Проверить, что дифф ровно такой, как задумано**
+  ```markdown
 
-Run: `git diff --stat`
-Expected: два файла — `src/server.mjs` (+6 строк: guard и две строки коммента)
-и `tests/server.test.mjs` (только добавленные тесты, без удалений). Что-либо
-ещё — убрать, это не относится к Issue #163.
+  `HEAD` на `/healthz` и `/stats` отвечает `200` с теми же заголовками, что и
+  `GET`, но без тела — так живость проверяют балансировщики и мониторинг.
+  ```
+
+  Раздел «Расхождения между README и кодом» не трогаем — там накопленный дрейф,
+  к этой задаче не относящийся.
 
 ---
 
-### Task 3: Завершение прогона — след решения и находки
+### Task 2: транспортная проверка HEAD — реальный сокет вместо mock
+
+Mock-обёртка из задачи 1 не проходит по настоящему HTTP: она проверяет
+`app(req, res)` и видит только то, что ушло в `res.end()`. Сценарий приёмки
+снимается curl-ом с живого сервера, поэтому у MVP должна быть и автоматическая
+проверка на транспорте — иначе сломать HEAD на уровне `createServer` тесты не
+заметят.
 
 **Files:**
-- Create: `.reflect.md` (корень рабочего каталога; в коммит не попадает —
-  его снимает контур)
-- Create: `.followups.md` (корень рабочего каталога; только если есть
-  настоящая находка — выдумывать не надо)
+- Create: `tests/head.test.mjs`
 
 **Interfaces:**
-- Consumes: результат Task 1 и Task 2 — рабочее дерево с правками в
-  `src/server.mjs` и `tests/server.test.mjs` и зелёным прогоном.
-- Produces: зафиксированный HowToDemo, `.reflect.md` с тремя разделами и
-  (при находках) `.followups.md`. В git ничего не коммитится и не пушится.
+- Consumes: экспорт `app(req, res)` из `src/server.mjs` (уже есть,
+  `tests/healthz.test.mjs` использует его так же); поведение из задачи 1 —
+  `HEAD` на `/healthz` и `/stats` отвечает `200` с заголовками GET и пустым
+  телом. Ничего нового в прод-коде не появляется.
+- Produces: ничего — файл только проверяет. Ништо из последующих задач его
+  не импортирует.
 
-- [ ] **Step 1: Финальный прогон тестов**
+- [ ] **Шаг 1: создать `tests/head.test.mjs` с содержимым целиком**
 
-Run: `node --test "tests/*.test.mjs"`
-Expected: PASS целиком. Без зелёного прогона работу не завершать.
+  ```js
+  import assert from 'node:assert/strict';
+  import { test } from 'node:test';
+  import { createServer } from 'node:http';
+  import { app } from '../src/server.mjs';
 
-- [ ] **Step 2: Записать находки в `.followups.md` (если есть)**
+  // Сценарий приёмки Issue #171 снимается curl-ом с живого сервера. Здесь тот
+  // же прогон через реальный сокет: mock-обёртка server.test.mjs не видит,
+  // как HEAD выглядит на настоящем HTTP.
+  async function withServer(run) {
+    const server = createServer(app);
+    await new Promise(resolve => server.listen(0, resolve));
+    const base = `http://localhost:${server.address().port}`;
+    try {
+      await run(base);
+    } finally {
+      server.close();
+    }
+  }
 
-По одному разделу `## <кратко>` на находку, с файлом/строкой и тем, когда
-всплывёт. Кандидаты, обнаруженные при планировании — проверить и записать, если
-подтвердятся своими глазами:
+  test('HEAD /healthz отвечает 200, заголовками GET и пустым телом', async () => {
+    await withServer(async base => {
+      const getRes = await fetch(`${base}/healthz`);
+      await getRes.text();
 
-- `README.md:36` — таблица маршрутов обещает для `POST /quote` коды
-  «200, 400, 404, 415»: `404` для POST-ветки недостижим, а появившийся `405`
-  для не-POST методов в таблице не назван. Сценарий приёмки проходит и без
-  правки документации, поэтому строка не входит в эту ветку.
-- `OPTIONS /quote` теперь тоже отвечает `405` — отдельного ответа на `OPTIONS`
-  (и CORS) у сервиса нет нигде.
+      const headRes = await fetch(`${base}/healthz`, { method: 'HEAD' });
+      const body = await headRes.text();
 
-Честно незакрытых находок нет — файла не создавать.
+      assert.equal(headRes.status, 200);
+      assert.equal(headRes.headers.get('content-type'), getRes.headers.get('content-type'));
+      assert.ok(Number(headRes.headers.get('content-length')) > 0);
+      assert.equal(body, '');
+    });
+  });
 
-- [ ] **Step 3: Записать `.reflect.md`**
+  test('HEAD /stats отвечает 200, тем же content-length, что GET, и пустым телом', async () => {
+    await withServer(async base => {
+      const getRes = await fetch(`${base}/stats`);
+      await getRes.text();
 
-Три раздела по строке на пункт: `## Намерение` — почему guard до POST-ветки и
-статики, а не внутри неё; `## Допущения` — что принято на веру (например, что
-`405` не должен считаться визитом в метриках); `## Сомнения` — что стоит
-перепроверить человеку.
+      const headRes = await fetch(`${base}/stats`, { method: 'HEAD' });
+      const body = await headRes.text();
 
-- [ ] **Step 4: Оставить рабочее дерево для workflow**
+      assert.equal(headRes.status, 200);
+      assert.equal(headRes.headers.get('content-type'), getRes.headers.get('content-type'));
+      assert.equal(headRes.headers.get('content-length'), getRes.headers.get('content-length'));
+      assert.equal(body, '');
+    });
+  });
+  ```
 
-Ничего не коммитить и не пушить: коммит, пуш и PR делает workflow после агента.
-Проверить `git status --short` — в изменениях только файлы из Task 2.
+  `server.close()` без `await` — как в существующем `tests/healthz.test.mjs`;
+  тела GET-ответов прочитаны до HEAD-запроса, чтобы undici вернул сокет в пул.
+
+- [ ] **Шаг 2: прогнать файл**
+
+  Run: `node --test tests/head.test.mjs`
+  Expected: PASS — два теста. До задачи 1 файл падал бы с `405`; здесь он
+  проверяет уже внесённую правку на транспорте.
+
+- [ ] **Шаг 3: полный прогон, как в CI**
+
+  Run: `node --test "tests/*.test.mjs"`
+  Expected: PASS во всех четырёх файлах (`healthz`, `metrics`, `pricing`,
+  `server`, `head`). Красный прогон в PR не отдаём.
+
+- [ ] **Шаг 4: снять сценарий приёмки руками (как в `.task.md`)**
+
+  В одном терминале: `node src/server.mjs` (порт по умолчанию 8080). В другом:
+
+  ```
+  $ curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/healthz
+  200
+
+  $ curl -s -o /dev/null -w '%{http_code}\n' -I http://localhost:8080/healthz
+  200
+
+  $ curl -s -o /dev/null -w '%{http_code}\n' -I http://localhost:8080/stats
+  200
+  ```
+
+  Равенство заголовков с GET проверяется сравнением двух выводов:
+  `curl -s -I http://localhost:8080/healthz` и
+  `curl -s -D - -o /dev/null http://localhost:8080/healthz` — в обоих
+  `content-type: application/json; charset=utf-8` и одинаковый `content-length`
+  (для свежего процесса `/healthz` — `30`, `/stats` — `26`).
+
+  Пустоту тела `-I` не покажет: с `--head` curl сам не ждёт тело. Её проверяет
+  `tests/head.test.mjs` (`assert.equal(body, '')`); вручную при желании —
+  `curl -s -X HEAD --max-time 3 http://localhost:8080/healthz`: вывода нет,
+  код возврата 28 (curl ждал тело, которого сервер не прислал).
+
+---
+
+### Task 3: след решения и находки вне MVP
+
+**Files:**
+- Create: `.followups.md` (в корне рабочего каталога; если находок нет — файл не создавать)
+- Create: `.reflect.md` (в корне рабочего каталога)
+
+**Interfaces:**
+- Consumes: результат задач 1–2 (рабочее дерево с правкой и зелёным прогоном) и
+  перечень «Вне MVP» из этого плана.
+- Produces: `.reflect.md` — три раздела `## Намерение` / `## Допущения` /
+  `## Сомнения`; `.followups.md` — по разделу `## <кратко>` на находку в
+  формате из `.task.md`. Оба файла контур снимает, в коммит они не попадают;
+  SubIssue по находкам заводит контур своим токеном.
+
+- [ ] **Шаг 1: записать находки в `.followups.md`**
+
+  Две находки из этого прогона (после правки строки в `src/server.mjs`
+  сместились — перепроверь номера перед записью):
+
+  ```markdown
+  ## Allow в 405 на /healthz и /stats не перечисляет HEAD
+
+  После того как HEAD стал валидным методом, ответ 405 на прочие методы
+  отдаёт `Allow: GET` (src/server.mjs, ветки /healthz и /stats). По
+  RFC 9110 §10.2.1 Allow должен перечислять все поддерживаемые методы, то есть
+  `GET, HEAD`. Правка трогает шесть существующих ассертов в
+  tests/server.test.mjs и для сценария приёмки #171 не нужна.
+
+  ## HEAD на статику отвечает 404
+
+  Раздача статики обёрнута в `req.method === 'GET'` (src/server.mjs, блок
+  «Serve static files»), поэтому `HEAD /index.html` проваливается в финальный
+  404 с JSON-телом про «файл не найден». Мониторинг из #171 статикой не
+  пользуется.
+  ```
+
+- [ ] **Шаг 2: записать `.reflect.md`**
+
+  ```markdown
+  # След решения
+
+  ## Намерение
+  - Тело HEAD-ответа срезаю явно в `send()` (параметр `omitBody`), а не полагаюсь
+    на транспорт: сценарий приёмки требует пустого тела, mock-обёртка тестов
+    видит ровно то, что ушло в `res.end()`, а спрятанная в обёртке логика — то,
+    чего тест не увидит.
+  - `omitBody` прокинул только в два маршрута из Issue: остальные коды ответов
+    (404, 405 /quote) сценарий не трогает, а правка всех вызовов `send` раздула
+    бы дифф без нужды для MVP.
+  - Guard переписал на `!== 'GET' && !== 'HEAD'`, а не на список методов: правка
+    одной строки в существующем условии, и 405-ветка с `Allow: GET` не меняется.
+
+  ## Допущения
+  - `Allow: GET` в 405-ответах оставил как есть — смена на `GET, HEAD` правит
+    шесть существующих тестов и вынесена в `.followups.md`.
+  - Индекс repowise был <доступен/недоступен — дописать, как вышло>.
+  - `HEAD /quote` оставил 405 c `Allow: POST`: у /quote нет GET-представления.
+
+  ## Сомнения
+  - Не проверено, срезает ли реальный Node тело HEAD-ответа сам: при явном
+    `omitBody` это ни на что не влияет, но curl-прогон из задачи 2 стоит
+    посмотреть глазами.
+  - `HEAD /index.html` → 404 записан в `.followups.md`, но желаемое поведение
+    человеком не подтверждено.
+  ```
 
 ---
 
 ## Вне MVP
 
-Не входит в эту ветку — сценарий приёмки проходит и без этого. По кандидатурам
-снимаются находки в `.followups.md` (Task 3, Step 2), SubIssue по ним заводит
-контур.
+Без этого сценарий приёмки проходит; в ветку не брать.
 
-1. **Таблица маршрутов в `README.md:36`.** После правки для `POST /quote`
-   реальны коды `200, 400, 405, 413, 415`, а не «200, 400, 404, 415».
-   Документацию стоит привести в соответствие, но на curl-сценарий она не
-   влияет; если ревьюер согласен, её можно донести в этом же PR отдельной
-   строкой диффа — решение за ревьюером, не за исполнителем.
-2. **`OPTIONS` и CORS.** Ни один эндпоинт не отвечает на `OPTIONS` отдельно;
-   `/quote` теперь отвечает `405` и там. Для демо-стенда этого достаточно.
-3. **`HEAD /quote`.** Тоже `405` с `Allow: POST`. Это корректно (GET на
-   `/quote` нет, пары GET/HEAD не возникает), но поведение стоит знать при
-   ревью.
-4. **Общий fallback `404`.** Неизвестный путь при любом методе по-прежнему
-   отвечает `404 {"error":"не найдено"}` — границы Issue это не трогают.
+1. **`Allow: GET, HEAD` в 405 на `/healthz` и `/stats`** — корректнее по
+   RFC 9110 §10.2.1, но требует правки шести существующих ассертов в
+   `tests/server.test.mjs`. Записывается в `.followups.md` (задача 3).
+2. **`HEAD` на статику** — сейчас 404, потому что раздача обёрнута в
+   `req.method === 'GET'`. Мониторинг из Issue статикой не проверяет.
+   Записывается в `.followups.md`.
+3. **`omitBody` в остальных ответах** — `HEAD /quote` (405) и `HEAD /<неизвестное>`
+   (404) пишут JSON-тело; явное подавление сделано только в двух маршрутах из
+   Issue. На реальном сервере тело HEAD-ответа срезает сам Node, поэтому
+   видимого эффекта нет; правка затронула бы ~15 call sites `send`.
+4. **Раздел `README.md` «Расхождения между README и кодом»** — накопленный
+   дрейф (промокоды, 415, минимальная сумма, `/stats`), к #171 отношения не
+   имеет.
+5. **`DELETE`/`PUT` и прочие методы** — поведение не меняется и тестами уже
+   покрыто; новых веток не заводить.
