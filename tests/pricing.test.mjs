@@ -12,6 +12,12 @@ import {
   PROMO_CODES,
 } from '../src/pricing.mjs';
 
+// Момент расчёта фиксируется: акция SUMMER20 действует до 2026-09-01, и без
+// этой даты три теста ниже краснеют сами собой со 2 сентября — на чистом
+// main, без единого коммита. CI такое не ловит: он гоняется на коммиты, а
+// календарь идёт сам. Тест обязан проверять расчёт, а не сегодняшнее число.
+const DURING_SUMMER = new Date('2026-08-15T12:00:00Z');
+
 test('сумма позиций считается по количеству, а не по числу строк', () => {
   assert.equal(subtotal([{ sku: 'a', price: 500, qty: 3 }]), 1500);
 });
@@ -110,7 +116,8 @@ test('промокод не передан — статус none, скидка 0
 });
 
 test('промо-код SUMMER20 даёт 20% скидку', () => {
-  const result = quote([{ sku: 'a', price: 3000, qty: 1 }], 'SUMMER20');
+  const result = quote([{ sku: 'a', price: 3000, qty: 1 }], 'SUMMER20', null, 1,
+                       DURING_SUMMER);
   assert.equal(result.goods, 3000);
   assert.equal(result.discount, 600);
   assert.equal(result.delivery, 0); // Порог достигнут по goods (3000 >= 3000)
@@ -142,7 +149,8 @@ test('неизвестный промо-код — статус unknown, ски�
 test('порог доставки считается до скидки', () => {
   // 3000 товаров без скидки → доставка 0
   // 3000 товаров со скидкой 20% → доставка всё ещё 0
-  const result = quote([{ sku: 'a', price: 3000, qty: 1 }], 'SUMMER20');
+  const result = quote([{ sku: 'a', price: 3000, qty: 1 }], 'SUMMER20', null, 1,
+                       DURING_SUMMER);
   assert.equal(result.goods, 3000);
   assert.equal(result.discount, 600);
   assert.equal(result.delivery, 0); // Порог достигнут по goods (3000 >= 3000)
@@ -160,7 +168,7 @@ test('discountAmount с неизвестным кодом возвращает 0
 
 test('discountAmount с валидным кодом считает скидку', () => {
   assert.equal(discountAmount(1000, 'WELCOME10'), 100);
-  assert.equal(discountAmount(2000, 'SUMMER20'), 400);
+  assert.equal(discountAmount(2000, 'SUMMER20', DURING_SUMMER), 400);
 });
 
 test('единое поведение функций при неизвестном промо-коде', () => {
@@ -279,4 +287,13 @@ test('paymentMethod с невалидным промокодом', () => {
   assert.equal(result.total, 2300);  // 2000 + 300 delivery
   assert.equal(result.payment.amount, 2300);
   assert.equal(result.paymentStatus, 'ready');
+});
+
+test('промо-код перестаёт действовать после срока', () => {
+  // Явная проверка того, что раньше проверялось нечаянно — самим течением
+  // времени. Теперь просроченность видна тестом, а не красным CI однажды утром.
+  const after = new Date('2026-09-02T00:00:00Z');
+  assert.equal(discountAmount(2000, 'SUMMER20', after), 0);
+  assert.equal(discountAmount(2000, 'WELCOME10', after), 200,
+    'у WELCOME10 срока нет — он обязан действовать всегда');
 });
