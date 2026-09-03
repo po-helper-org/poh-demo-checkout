@@ -160,25 +160,25 @@ test('GET /healthz возвращает 200 с данными о состоян�
   assert.ok(res.body.uptime_sec >= 0);
 });
 
-test('POST /healthz возвращает 405 с заголовком Allow: GET', async () => {
+test('POST /healthz возвращает 405 с заголовком Allow: GET, HEAD', async () => {
   const res = await request('/healthz', 'POST');
   assert.equal(res.statusCode, 405);
   assert.equal(res.body.error, 'Method Not Allowed');
-  assert.equal(res.headers['Allow'], 'GET');
+  assert.equal(res.headers['Allow'], 'GET, HEAD');
 });
 
-test('PUT /healthz возвращает 405 с заголовком Allow: GET', async () => {
+test('PUT /healthz возвращает 405 с заголовком Allow: GET, HEAD', async () => {
   const res = await request('/healthz', 'PUT');
   assert.equal(res.statusCode, 405);
   assert.equal(res.body.error, 'Method Not Allowed');
-  assert.equal(res.headers['Allow'], 'GET');
+  assert.equal(res.headers['Allow'], 'GET, HEAD');
 });
 
-test('DELETE /healthz возвращает 405 с заголовком Allow: GET', async () => {
+test('DELETE /healthz возвращает 405 с заголовком Allow: GET, HEAD', async () => {
   const res = await request('/healthz', 'DELETE');
   assert.equal(res.statusCode, 405);
   assert.equal(res.body.error, 'Method Not Allowed');
-  assert.equal(res.headers['Allow'], 'GET');
+  assert.equal(res.headers['Allow'], 'GET, HEAD');
 });
 
 test('GET /healthz с query string возвращает 200', async () => {
@@ -195,25 +195,25 @@ test('GET /stats с query string возвращает 200', async () => {
   assert.equal(typeof res.body.successes, 'number');
 });
 
-test('POST /stats возвращает 405 с заголовком Allow: GET', async () => {
+test('POST /stats возвращает 405 с заголовком Allow: GET, HEAD', async () => {
   const res = await request('/stats', 'POST');
   assert.equal(res.statusCode, 405);
   assert.equal(res.body.error, 'Method Not Allowed');
-  assert.equal(res.headers['Allow'], 'GET');
+  assert.equal(res.headers['Allow'], 'GET, HEAD');
 });
 
-test('PUT /stats возвращает 405 с заголовком Allow: GET', async () => {
+test('PUT /stats возвращает 405 с заголовком Allow: GET, HEAD', async () => {
   const res = await request('/stats', 'PUT');
   assert.equal(res.statusCode, 405);
   assert.equal(res.body.error, 'Method Not Allowed');
-  assert.equal(res.headers['Allow'], 'GET');
+  assert.equal(res.headers['Allow'], 'GET, HEAD');
 });
 
-test('DELETE /stats возвращает 405 с заголовком Allow: GET', async () => {
+test('DELETE /stats возвращает 405 с заголовком Allow: GET, HEAD', async () => {
   const res = await request('/stats', 'DELETE');
   assert.equal(res.statusCode, 405);
   assert.equal(res.body.error, 'Method Not Allowed');
-  assert.equal(res.headers['Allow'], 'GET');
+  assert.equal(res.headers['Allow'], 'GET, HEAD');
 });
 
 // === HEAD на /healthz и /stats (Issue #171) ===

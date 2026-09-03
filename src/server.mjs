@@ -112,7 +112,7 @@ export const app = async (req, res) => {
 
   if (pathname === '/healthz') {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
-      return send(res, 405, { error: 'Method Not Allowed' }, { 'Allow': 'GET' });
+      return send(res, 405, { error: 'Method Not Allowed' }, { 'Allow': 'GET, HEAD' });
     }
     return send(res, 200, {
       status: 'ok',
@@ -122,7 +122,7 @@ export const app = async (req, res) => {
 
   if (pathname === '/stats') {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
-      return send(res, 405, { error: 'Method Not Allowed' }, { 'Allow': 'GET' });
+      return send(res, 405, { error: 'Method Not Allowed' }, { 'Allow': 'GET, HEAD' });
     }
     return send(res, 200, counters.getStats(), {}, omitBody);
   }

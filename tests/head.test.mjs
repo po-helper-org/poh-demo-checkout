@@ -46,3 +46,17 @@ test('HEAD /stats отвечает 200, тем же content-length, что GET, 
     assert.equal(body, '');
   });
 });
+
+test('405 объявляет и GET, и HEAD в заголовке Allow', async () => {
+  // Заголовок обязан перечислять то, что действительно разрешено: HEAD стал
+  // допустимым методом, и `Allow: GET` после этого — неправда. Клиент,
+  // читающий Allow, чтобы узнать допустимые методы, получал бы неполный ответ.
+  await withServer(async base => {
+    for (const path of ['/healthz', '/stats']) {
+      const res = await fetch(`${base}${path}`, { method: 'POST' });
+      await res.text();
+      assert.equal(res.status, 405);
+      assert.equal(res.headers.get('allow'), 'GET, HEAD', path);
+    }
+  });
+});
