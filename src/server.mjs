@@ -26,14 +26,17 @@ const MIME_TYPES = {
 
 const PORT = Number(process.env.PORT || 8080);
 
-function send(res, code, body, extraHeaders = {}) {
+function send(res, code, body, extraHeaders = {}, omitBody = false) {
   const payload = JSON.stringify(body);
   res.writeHead(code, {
     'content-type': 'application/json; charset=utf-8',
     'content-length': Buffer.byteLength(payload),
     ...extraHeaders
   });
-  res.end(payload);
+  // HEAD отвечает теми же заголовками, что и GET, но без тела
+  // (RFC 9110 §9.3.2): content-length остаётся длиной полного ответа —
+  // по нему мониторинг и сравнивает живой сервис.
+  res.end(omitBody ? undefined : payload);
 }
 
 function sendStatic(res, filePath) {
@@ -104,21 +107,24 @@ export const app = async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   const pathname = url.pathname;
 
+  // HEAD — это GET без тела: так живость проверяют балансировщики и мониторинг.
+  const omitBody = req.method === 'HEAD';
+
   if (pathname === '/healthz') {
-    if (req.method !== 'GET') {
-      return send(res, 405, { error: 'Method Not Allowed' }, { 'Allow': 'GET' });
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      return send(res, 405, { error: 'Method Not Allowed' }, { 'Allow': 'GET, HEAD' });
     }
     return send(res, 200, {
       status: 'ok',
       uptime_sec: Math.floor(process.uptime())
-    });
+    }, {}, omitBody);
   }
 
   if (pathname === '/stats') {
-    if (req.method !== 'GET') {
-      return send(res, 405, { error: 'Method Not Allowed' }, { 'Allow': 'GET' });
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      return send(res, 405, { error: 'Method Not Allowed' }, { 'Allow': 'GET, HEAD' });
     }
-    return send(res, 200, counters.getStats());
+    return send(res, 200, counters.getStats(), {}, omitBody);
   }
 
   // Не POST на /quote — 405 с Allow, как у /healthz и /stats: без guard-а
