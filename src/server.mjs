@@ -26,14 +26,16 @@ const MIME_TYPES = {
 
 const PORT = Number(process.env.PORT || 8080);
 
-function send(res, code, body, extraHeaders = {}) {
+function send(res, code, body, extraHeaders = {}, { head = false } = {}) {
   const payload = JSON.stringify(body);
   res.writeHead(code, {
     'content-type': 'application/json; charset=utf-8',
     'content-length': Buffer.byteLength(payload),
     ...extraHeaders
   });
-  res.end(payload);
+  // HEAD отвечает теми же заголовками, что GET (включая content-length), но
+  // без тела: на нём живость проверяют балансировщики и мониторинг.
+  res.end(head ? undefined : payload);
 }
 
 function sendStatic(res, filePath) {
@@ -105,13 +107,14 @@ export const app = async (req, res) => {
   const pathname = url.pathname;
 
   if (pathname === '/healthz') {
-    if (req.method !== 'GET') {
-      return send(res, 405, { error: 'Method Not Allowed' }, { 'Allow': 'GET' });
+    const isHead = req.method === 'HEAD';
+    if (req.method !== 'GET' && !isHead) {
+      return send(res, 405, { error: 'Method Not Allowed' }, { 'Allow': 'GET, HEAD' });
     }
     return send(res, 200, {
       status: 'ok',
       uptime_sec: Math.floor(process.uptime())
-    });
+    }, {}, { head: isHead });
   }
 
   if (pathname === '/stats') {

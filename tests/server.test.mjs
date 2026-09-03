@@ -160,24 +160,54 @@ test('GET /healthz возвращает 200 с данными о состоян�
   assert.ok(res.body.uptime_sec >= 0);
 });
 
-test('POST /healthz возвращает 405 с заголовком Allow: GET', async () => {
+test('POST /healthz возвращает 405 с заголовком Allow: GET, HEAD', async () => {
   const res = await request('/healthz', 'POST');
   assert.equal(res.statusCode, 405);
   assert.equal(res.body.error, 'Method Not Allowed');
-  assert.equal(res.headers['Allow'], 'GET');
+  assert.equal(res.headers['Allow'], 'GET, HEAD');
 });
 
-test('PUT /healthz возвращает 405 с заголовком Allow: GET', async () => {
+test('PUT /healthz возвращает 405 с заголовком Allow: GET, HEAD', async () => {
   const res = await request('/healthz', 'PUT');
   assert.equal(res.statusCode, 405);
   assert.equal(res.body.error, 'Method Not Allowed');
-  assert.equal(res.headers['Allow'], 'GET');
+  assert.equal(res.headers['Allow'], 'GET, HEAD');
 });
 
-test('DELETE /healthz возвращает 405 с заголовком Allow: GET', async () => {
+test('DELETE /healthz возвращает 405 с заголовком Allow: GET, HEAD', async () => {
   const res = await request('/healthz', 'DELETE');
   assert.equal(res.statusCode, 405);
   assert.equal(res.body.error, 'Method Not Allowed');
+  assert.equal(res.headers['Allow'], 'GET, HEAD');
+});
+
+test('HEAD /healthz возвращает 200 с заголовками GET и пустым телом', async () => {
+  // Патчим uptime, чтобы content-length был предсказуем: HEAD обязан нести
+  // content-length ровно того тела, которое отдал бы GET, а без патча целая
+  // секунда может переключиться между запросами и тест станет плавающим.
+  const realUptime = process.uptime;
+  process.uptime = () => 7;
+  try {
+    const get = await request('/healthz', 'GET');
+    const head = await request('/healthz', 'HEAD');
+
+    assert.deepEqual(get.body, { status: 'ok', uptime_sec: 7 });
+    assert.equal(head.statusCode, 200);
+    assert.equal(head.body, ''); // тело пустое — в этом смысл HEAD
+    assert.equal(head.headers['content-type'], 'application/json; charset=utf-8');
+    // content-length как у GET, хотя самого тела нет
+    assert.equal(
+      head.headers['content-length'],
+      Buffer.byteLength(JSON.stringify(get.body))
+    );
+  } finally {
+    process.uptime = realUptime;
+  }
+});
+
+test('HEAD /stats остаётся 405: HEAD разрешён только на /healthz', async () => {
+  const res = await request('/stats', 'HEAD');
+  assert.equal(res.statusCode, 405);
   assert.equal(res.headers['Allow'], 'GET');
 });
 
